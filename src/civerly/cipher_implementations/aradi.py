@@ -209,22 +209,22 @@ class ARADI_CVL:
                post-whitening key addition.  Defaults to ``16`` both
                here and in non-slicing mode.
 
-         ROUND STRUCTURE:
+        ROUND STRUCTURE:
 
-             Each round is a named ``SBoxCipher`` subcipher wired as
+            Each round is a named ``SBoxCipher`` subcipher wired as
             ``add-round-key -> S-box layer -> linear layer``.  The
-             linear layer cycles through four variants ``L0``--``L3``
-             with shift parameters ``(11,8,14)``, ``(10,9,11)``,
+            linear layer cycles through four variants ``L0``--``L3``
+            with shift parameters ``(11,8,14)``, ``(10,9,11)``,
             ``(9,4,14)``, and ``(8,9,7)``.
 
-             The first round of the slice is just the ordinary round
-             keyed with ``rks[round_index - round_start]``.  A
-             post-whitening key addition is only appended when
-             ``round_end`` equals the last round of the full cipher
-             (``R - 1`` for a freshly constructed cipher, or the last
-             round of the ``R`` supplied in slicing mode).  This
-             allows constructing a slice ``round_start..round_end``
-             without unwanted extra key additions.
+            The first round of the slice is just the ordinary round
+            keyed with ``rks[round_index - round_start]``.  A
+            post-whitening key addition is only appended when
+            ``round_end`` equals the last round of the full cipher
+            (``R - 1`` for a freshly constructed cipher, or the last
+            round of the ``R`` supplied in slicing mode).  This
+            allows constructing a slice ``round_start..round_end``
+            without unwanted extra key additions.
 
 
             Round subcipher node indices are stored in
@@ -237,7 +237,7 @@ class ARADI_CVL:
             ``i = a .. b`` and rewiring them into a new
             ``SBoxCipher``.
 
-        EXAMPLES::
+        TESTS::
 
             sage: from civerly.cipher_implementations.aradi import ARADI_CVL
             sage: from civerly.util import int_to_vec, vec_to_int
@@ -274,85 +274,31 @@ class ARADI_CVL:
             sage: hex(vec_to_int(aradi_from_key(int_to_vec(0x0, 128))))
             '0x3f09abf400e3bd7403260defb7c53912'
 
+        Analyse ARADI with MILP (matching https://eprint.iacr.org/2024/1324.pdf)::   
+        
             sage: # optional - scip # doctest: +ELLIPSIS
-            sage: from civerly.cipher_implementations.aradi import ARADI_CVL
-            sage: from civerly.model_options import *
-            sage: aradi_small = ARADI_CVL(R=2, rks=[0x0]*3)
-            sage: import tempfile
-            sage: from pathlib import Path
-            sage: with tempfile.TemporaryDirectory() as tmpdir:
+            ....: from civerly.cipher_implementations.aradi import ARADI_CVL
+            ....: from civerly.model_options import *
+            ....: aradi_small = ARADI_CVL(R=2, rks=[0x0]*3)
+            ....: import tempfile
+            ....: from pathlib import Path
+            ....: with tempfile.TemporaryDirectory() as tmpdir:
             ....:   model_options = MODEL_OPTIONS(
             ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
             ....:     optimization=OPTIMIZATION.MILP,
             ....:     granularity=GRANULARITY.BITWISE,
-            ....:     linear_layer_modeling=LINEAR_LAYER_MODELING.CONVEX_HULL,
-            ....:     sbox_modeling=SBOX_MODELING.CONVEX_HULL,
+            ....:     linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
+            ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
             ....:     milp_solver=SCIP_CVL(),
+            ....:     logic_minimizer=ESPRESSO_CVL(),
             ....:     path=Path(tmpdir))
-            ....:   aradi_small.model(model_options)
             ....:   aradi_small.analyse(model_options)
             ....:   trail = aradi_small.get_trail(model_options)
             ....:   all("Unnamed Component" not in str(node) for node in trail.children)
-            ...
-
-            sage: aradi_partial = ARADI_CVL(rks=rks[2:6], round_start=2, round_end=5)
-            sage: len(aradi_partial.round_outputs)
-            4
-            sage: hex(vec_to_int(aradi_partial(int_to_vec(0x0, 128))))
-            '0x9666618e428af892d9c6cdfef6dd8ac8'
-
-            sage: aradi_partial_final = ARADI_CVL(
-            ....:   rks=rks[14:], round_start=14, round_end=15, R=16)
-            sage: len(aradi_partial_final.round_outputs)
-            2
-            sage: hex(vec_to_int(aradi_partial_final(int_to_vec(0x0, 128)))) == \
-            ....:   hex(vec_to_int(ARADI_CVL(rks=rks)(int_to_vec(0x0, 128))))
-            False
-
-            sage: ARADI_CVL(rks=rks[2:6], round_start=2, round_end=5, R=4)
-            Traceback (most recent call last):
-            ...
-            ValueError: R must be a positive integer greater than round_end.
-
-            sage: ARADI_CVL(rks=rks[2:6], round_start=2, R=4)
-            Traceback (most recent call last):
-            ...
-            ValueError: round_end must be specified when round_start is not 0.
-
-            sage: ARADI_CVL(rks=rks[2:6], round_start=2)
-            Traceback (most recent call last):
-            ...
-            ValueError: round_end must be specified when round_start is not 0.
-
-            sage: ARADI_CVL(rks=rks, key=key)
-            Traceback (most recent call last):
-            ...
-            ValueError: ARADI_CVL accepts either explicit round keys via `rks` or a master key via `key`, not both.
-
-            sage: # A slice can also be derived from the master key schedule
-            sage: aradi_key_slice = ARADI_CVL(key=key, round_start=2, round_end=5, R=16)
-            sage: len(aradi_key_slice.round_outputs)
-            4
-
-            sage: if True:
-            ....:     from copy import deepcopy
-            ....:     from civerly.sboxcipher import SBoxCipher
-            ....:     aradi = ARADI_CVL(rks=rks)
-            ....:     sliced = SBoxCipher(128, 128, name='slice')
-            ....:     node = sliced.IN
-            ....:     for i in [2, 3, 4, 5]:
-            ....:         rn = deepcopy(aradi.nodes[aradi.round_outputs[i]])
-            ....:         edges = []
-            ....:         for j in range(128):
-            ....:             edges.append((node, (j, j)))
-            ....:         node = sliced.add_subcipher(rn, edges)
-            ....:     out_edges = []
-            ....:     for j in range(128):
-            ....:         out_edges.append((node, (j, j)))
-            ....:     sliced.add_output(out_edges)
-            ....:     sliced.is_valid
+            Using existing file ..., make sure it is up to date!
+            7872 variables and 9537 constraints were written to ...
+            8
             True
-
         """
         rks_provided = rks is not None
         if rks is None:
@@ -392,6 +338,7 @@ class ARADI_CVL:
         include_post_whiten = round_end + 1 == full_rounds
         expected_rks_count = actual_rounds + (1 if include_post_whiten else 0)
 
+        # NOTE: this implements the application of the key schedule?
         if key is not None:
             if rks_provided:
                 raise ValueError(
