@@ -1,11 +1,15 @@
-from civerly.aeslike import AESlike
-from civerly.component import SBox_CVL, PermuteLayer_CVL, LinearLayer_CVL
-from civerly.component import RoundkeyXOR_CVL
 from sage.crypto.sbox import SBox
-from sage.rings.finite_rings.finite_field_constructor import GF
 from sage.matrix.constructor import Matrix as matrix
-from sage.matrix.special import identity_matrix, block_matrix
+from sage.matrix.special import block_matrix, identity_matrix
+from sage.rings.finite_rings.finite_field_constructor import GF
 
+from civerly.aeslike import AESlike
+from civerly.component import (
+    LinearLayer_CVL,
+    PermuteLayer_CVL,
+    RoundkeyXOR_CVL,
+    SBox_CVL,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers for the BEANIE tweak-key schedule
@@ -752,6 +756,6 @@ class BEANIE_CVL:
         self.beanie_cipher = beanie_cipher
 
     def __new__(cls, *args, **kwargs):
-        instance = super(BEANIE_CVL, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.beanie_cipher

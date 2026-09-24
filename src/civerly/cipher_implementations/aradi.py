@@ -274,8 +274,8 @@ class ARADI_CVL:
             sage: hex(vec_to_int(aradi_from_key(int_to_vec(0x0, 128))))
             '0x3f09abf400e3bd7403260defb7c53912'
 
-        Analyse ARADI with MILP (matching https://eprint.iacr.org/2024/1324.pdf)::   
-        
+        Analyse ARADI with MILP (matching https://eprint.iacr.org/2024/1324.pdf)::
+
             sage: # optional - scip # doctest: +ELLIPSIS
             ....: from civerly.cipher_implementations.aradi import ARADI_CVL
             ....: from civerly.model_options import *
@@ -462,6 +462,6 @@ class ARADI_CVL:
 
     def __new__(cls, *args, **kwargs):
         """Return the constructed cipher graph instance."""
-        instance = super(ARADI_CVL, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.cipher

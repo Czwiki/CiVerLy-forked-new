@@ -15,7 +15,6 @@ from sage.crypto.sbox import SBox
 from civerly.component import I_CVL, SBox_CVL
 from civerly.sboxcipher import SBoxCipher
 
-
 PARAMS = {
     32: {
         "l1": 13,
@@ -204,7 +203,7 @@ def reference_katan_encrypt(variant, plaintext_int, key_int, rounds):
     steps = params["steps"]
 
     # initialize L1 and L2 as lists of bits, index 0 = least significant
-    mask_l2 = (1 << l2) - 1
+    (1 << l2) - 1
     L2 = [(plaintext_int >> i) & 1 for i in range(l2)]
     L1 = [((plaintext_int >> (l2 + i)) & 1) for i in range(l1)]
 
@@ -234,8 +233,8 @@ def reference_katan_encrypt(variant, plaintext_int, key_int, rounds):
             )
 
             # shift left (towards higher index), dropping MSB (last element)
-            L1 = [fb] + L1[:-1]
-            L2 = [fa] + L2[:-1]
+            L1 = [fb, *L1[:-1]]
+            L2 = [fa, *L2[:-1]]
 
         elif steps == 2:
             fa_1 = (
@@ -267,8 +266,8 @@ def reference_katan_encrypt(variant, plaintext_int, key_int, rounds):
                 ^ k[2 * r + 1]
             )
 
-            L1 = [fb_0, fb_1] + L1[:-2]
-            L2 = [fa_0, fa_1] + L2[:-2]
+            L1 = [fb_0, fb_1, *L1[:-2]]
+            L2 = [fa_0, fa_1, *L2[:-2]]
 
         elif steps == 3:
             fa_2 = (
@@ -314,8 +313,8 @@ def reference_katan_encrypt(variant, plaintext_int, key_int, rounds):
                 ^ k[2 * r + 1]
             )
 
-            L1 = [fb_0, fb_1, fb_2] + L1[:-3]
-            L2 = [fa_0, fa_1, fa_2] + L2[:-3]
+            L1 = [fb_0, fb_1, fb_2, *L1[:-3]]
+            L2 = [fa_0, fa_1, fa_2, *L2[:-3]]
 
         else:
             raise ValueError("Unsupported steps")
@@ -524,6 +523,6 @@ class KATAN_CVL:
         self.cipher = cipher
 
     def __new__(cls, *args, **kwargs):
-        instance = super(KATAN_CVL, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.cipher

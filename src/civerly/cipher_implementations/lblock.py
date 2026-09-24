@@ -1,13 +1,13 @@
 from sage.crypto.sbox import SBox
-from civerly.sboxcipher import SBoxCipher
+
 from civerly.component import (
-    SBox_CVL,
+    XOR_CVL,
     PermuteLayer_CVL,
     RotateLayer_CVL,
     RoundkeyXOR_CVL,
-    XOR_CVL,
+    SBox_CVL,
 )
-
+from civerly.sboxcipher import SBoxCipher
 
 # S-boxes used in LBlock (s0 through s9)
 _SBOX_TABLES = [
@@ -259,6 +259,6 @@ class LBLOCK_CVL:
         self.cipher = cipher
 
     def __new__(cls, *args, **kwargs):
-        instance = super(LBLOCK_CVL, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.cipher

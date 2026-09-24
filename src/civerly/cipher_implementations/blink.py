@@ -23,16 +23,16 @@ published test vectors.
 """
 
 from sage.crypto.sbox import SBox
-from sage.matrix.special import identity_matrix, block_matrix
 from sage.matrix.constructor import Matrix as matrix
 from sage.rings.finite_rings.finite_field_constructor import GF
 
+from civerly.component import (
+    LinearLayer_CVL,
+    PermuteLayer_CVL,
+    RoundkeyXOR_CVL,
+    SBox_CVL,
+)
 from civerly.wordsboxcipher import WordSBoxCipher
-from civerly.component import SBox_CVL, LinearLayer_CVL, PermuteLayer_CVL
-from civerly.component import RoundkeyXOR_CVL
-
-from civerly.util import int_to_vec, vec_to_int
-
 
 # ---------------------------------------------------------------------------
 # Shared tables
@@ -967,17 +967,17 @@ def _hash_func(key, t, hk_len, state_bytes, tweak_bytes):
     h = [0] * state_bytes
     for i in range(state_bytes - 1, -1, -1):
         h[state_bytes - 1 - i] = 0
-        for l in range(8):
+        for c in range(8):
             temp = [0] * tweak_bytes
             for j in range(tweak_bytes):
-                left = (key[tweak_bytes + i - j] << l) & 0xFF
-                right = (key[tweak_bytes + i - j - 1] >> (8 - l)) & 0xFF
+                left = (key[tweak_bytes + i - j] << c) & 0xFF
+                right = (key[tweak_bytes + i - j - 1] >> (8 - c)) & 0xFF
                 temp[tweak_bytes - 1 - j] = left ^ right
             p = 0
             for j in range(tweak_bytes):
                 p ^= t[j] & temp[j]
                 p &= 0xFF
-            h[state_bytes - 1 - i] ^= HW2[p] << l
+            h[state_bytes - 1 - i] ^= HW2[p] << c
             h[state_bytes - 1 - i] &= 0xFF
     return h
 
@@ -1213,9 +1213,9 @@ class BLINK_CVL:
 
     Sliced instances are built with ``start`` / ``end``. Rounds are
     numbered by S-box layer; for the default Blink-64 variant this gives
-    ``1 … 14``. Rounds ``1–2`` are the outer forward block, rounds ``4–6``
-    the inner forward block, rounds ``9–11`` the inner backward block and
-    rounds ``13–14`` the outer backward block. The structural middle
+    ``1 … 14``. Rounds ``1-2`` are the outer forward block, rounds ``4-6``
+    the inner forward block, rounds ``9-11`` the inner backward block and
+    rounds ``13-14`` the outer backward block. The structural middle
     stages are numbered as rounds too: ``3`` is ``h0`` (S, M, AK(h0), P),
     ``7`` and ``8`` are the two S-boxes of ``hxor`` (with the MixColumn
     and constant XOR between them), and ``12`` is ``h1`` (P^-1, AK(h1),
@@ -1522,7 +1522,6 @@ class BLINK_CVL:
             # stage are omitted). If the slice ends inside such a stage, the
             # trailing operations are omitted and the slice terminates after
             # that S-box.
-            total_rounds = total_sbox_rounds
             for r in range(start, end + 1):
                 if 1 <= r <= ra:
                     # Forward outer round
@@ -1605,7 +1604,7 @@ class BLINK_CVL:
         self.blink_cipher = cipher
 
     def __new__(cls, *args, **kwargs):
-        instance = super(BLINK_CVL, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.blink_cipher
 

@@ -22,17 +22,16 @@ EXAMPLES::
 """
 
 from sage.crypto.sbox import SBox as SBox_sage
-from sage.rings.finite_rings.finite_field_constructor import GF
 from sage.matrix.constructor import Matrix as matrix
+from sage.rings.finite_rings.finite_field_constructor import GF
 
-from civerly.sboxcipher import SBoxCipher
 from civerly.component import (
-    SBox_CVL,
     LinearLayer_CVL,
-    RoundkeyXOR_CVL,
     PermuteLayer_CVL,
+    RoundkeyXOR_CVL,
+    SBox_CVL,
 )
-
+from civerly.sboxcipher import SBoxCipher
 
 PHI = 0x9E3779B9
 
@@ -404,10 +403,7 @@ def serpent_key_schedule(master_key, keylen=128, R=32):
     if R > 32:
         raise ValueError("Serpent only supports up to 32 rounds")
 
-    if keylen < 256:
-        key = int(master_key) | (1 << keylen)
-    else:
-        key = int(master_key)
+    key = int(master_key) | 1 << keylen if keylen < 256 else int(master_key)
 
     # Split 256 key bits into 8 little-endian words.
     w_init = [(key >> (32 * i)) & 0xFFFFFFFF for i in range(8)]
@@ -430,13 +426,13 @@ def serpent_key_schedule(master_key, keylen=128, R=32):
         sbox = SERPENT_SBOXES[whichS % 8]
         for j in range(32):
             nibble = 0
-            for l in range(4):
-                bit = (w[4 * i + l] >> j) & 1
-                nibble |= bit << l
+            for c in range(4):
+                bit = (w[4 * i + c] >> j) & 1
+                nibble |= bit << c
             output = int(sbox(nibble))
-            for l in range(4):
-                bit = (output >> l) & 1
-                k[4 * i + l] |= bit << j
+            for c in range(4):
+                bit = (output >> c) & 1
+                k[4 * i + c] |= bit << j
 
     # Pack the 4 words into a 128-bit bitslice integer and apply IP to get
     # the standard-mode round key KHat.
@@ -878,6 +874,6 @@ class SERPENT_CVL:
         self.cipher = cipher
 
     def __new__(cls, *args, **kwargs):
-        instance = super(SERPENT_CVL, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.cipher

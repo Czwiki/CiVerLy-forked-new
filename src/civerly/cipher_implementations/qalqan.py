@@ -374,10 +374,7 @@ def _normalize_key(key):
     """
     if isinstance(key, (bytes, bytearray)):
         return bytes(key)
-    if isinstance(key, int):
-        k = key
-    else:
-        k = int(key)
+    k = key if isinstance(key, int) else int(key)
     length = max(32, (k.bit_length() + 7) // 8)
     return k.to_bytes(length, "big")
 
@@ -478,8 +475,8 @@ def _qalqan_round_keys(key, rounds=None):
         fa = _feedback_A()
         fb = _feedback_B()
         # Shift
-        A = A[1:] + [fa]
-        B = B[1:] + [fb]
+        A = [*A[1:], fa]
+        B = [*B[1:], fb]
 
     keys = []
     for _ in range(rounds):
@@ -845,10 +842,7 @@ class QALQAN_CVL:
         elif R is not None:
             R = int(R)
             start_round = 0
-            if R == full_rounds:
-                end_round = full_rounds
-            else:
-                end_round = R - 1
+            end_round = full_rounds if full_rounds == R else R - 1
         else:
             start_round = 0
             end_round = full_rounds
@@ -858,10 +852,7 @@ class QALQAN_CVL:
             if end_round is not None:
                 needed = end_round + 1
             elif R is not None:
-                if R == full_rounds:
-                    needed = full_rounds + 1
-                else:
-                    needed = R
+                needed = full_rounds + 1 if full_rounds == R else R
             else:
                 needed = full_rounds + 1
             rks = [int.from_bytes(rk, "big") for rk in _qalqan_round_keys(key, needed)]
@@ -1014,6 +1005,6 @@ class QALQAN_CVL:
         self.cipher = cipher
 
     def __new__(cls, *args, **kwargs):
-        instance = super(QALQAN_CVL, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.cipher

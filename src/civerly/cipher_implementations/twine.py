@@ -1,10 +1,11 @@
 from sage.crypto.sbox import SBox
+
+from civerly.component import XOR_CVL, PermuteLayer_CVL, RoundkeyXOR_CVL, SBox_CVL
 from civerly.wordsboxcipher import WordSBoxCipher
-from civerly.component import SBox_CVL, PermuteLayer_CVL, RoundkeyXOR_CVL, XOR_CVL
 
 
 class TWINE_CVL:
-    _SBOX_TABLE = [
+    _SBOX_TABLE = (
         0xC,
         0x0,
         0xF,
@@ -21,8 +22,8 @@ class TWINE_CVL:
         0xE,
         0x6,
         0x4,
-    ]
-    _PERMUTATION = [
+    )
+    _PERMUTATION = (
         5,
         0,
         1,
@@ -39,8 +40,8 @@ class TWINE_CVL:
         10,
         11,
         14,
-    ]
-    _ROUND_CONSTANTS = [
+    )
+    _ROUND_CONSTANTS = (
         0x01,
         0x02,
         0x04,
@@ -76,7 +77,7 @@ class TWINE_CVL:
         0x09,
         0x12,
         0x24,
-    ]
+    )
 
     @staticmethod
     def _key_schedule_80(key):
@@ -108,7 +109,7 @@ class TWINE_CVL:
             con = TWINE_CVL._ROUND_CONSTANTS[r - 1]
             WK[7] = WK[7] ^ ((con >> 3) & 0x7)
             WK[19] = WK[19] ^ (con & 0x7)
-            WK[0:4] = WK[1:4] + [WK[0]]
+            WK[0:4] = [*WK[1:4], WK[0]]
             WK[0:20] = WK[4:20] + WK[0:4]
         rk = (
             (WK[1] << 28)
@@ -154,7 +155,7 @@ class TWINE_CVL:
             con = TWINE_CVL._ROUND_CONSTANTS[r - 1]
             WK[7] = WK[7] ^ ((con >> 3) & 0x7)
             WK[19] = WK[19] ^ (con & 0x7)
-            WK[0:4] = WK[1:4] + [WK[0]]
+            WK[0:4] = [*WK[1:4], WK[0]]
             WK[0:32] = WK[4:32] + WK[0:4]
         rk = (
             (WK[2] << 28)
@@ -421,6 +422,6 @@ class TWINE_CVL:
         self.cipher = cipher
 
     def __new__(cls, *args, **kwargs):
-        instance = super(TWINE_CVL, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.cipher

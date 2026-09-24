@@ -1,6 +1,7 @@
 from sage.crypto.sbox import SBox
+
+from civerly.component import XOR_CVL, PermuteLayer_CVL, RoundkeyXOR_CVL, SBox_CVL
 from civerly.wordsboxcipher import WordSBoxCipher
-from civerly.component import SBox_CVL, PermuteLayer_CVL, RoundkeyXOR_CVL, XOR_CVL
 
 
 class WARP_CVL:
@@ -364,6 +365,6 @@ class WARP_CVL:
         self.warp_cipher = warp_cipher
 
     def __new__(cls, *args, **kwargs):
-        instance = super(WARP_CVL, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.warp_cipher
