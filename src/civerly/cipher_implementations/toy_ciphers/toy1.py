@@ -1,7 +1,8 @@
 from sage.matrix.constructor import Matrix as matrix
 from sage.rings.finite_rings.finite_field_constructor import GF
-from civerly.sboxcipher import SBoxCipher
+
 from civerly.component import LinearLayer_CVL, PermuteLayer_CVL
+from civerly.sboxcipher import SBoxCipher
 
 
 # linear cipher with non-bijective LinearLayer_CVL's, different intermediate
@@ -26,20 +27,13 @@ class Toy1:
             ....:       optimization=OPTIMIZATION.SAT,
             ....:       granularity=GRANULARITY.BITWISE,
             ....:       linear_layer_modeling=LINEAR_LAYER_MODELING.EXCLUDE_ODD,
-            ....:       sat_solver=CRYPTOMINISAT_CVL(),
+            ....:       sat_solver=SOLVER.CRYPTOMINISAT,
             ....:       path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             ....:   cipher.generate_report(model_options)
             ....:   trail = str(cipher.get_trail(model_options))
             ....:   assert "Unnamed Component" not in trail
             382 variables and 1527 clauses were written to '...'
-            [  0 ,100] (trying w =  50) : SAT
-            [  0 , 50] (trying w =  25) : SAT
-            [  0 , 25] (trying w =  12) : SAT
-            [  0 , 12] (trying w =   6) : SAT
-            [  0 ,  6] (trying w =   3) : SAT
-            [  0 ,  3] (trying w =   1) : SAT
-            [  0 ,  1] (trying w =   0) : SAT
             0
             Output file in: ...
             sage: with tempfile.TemporaryDirectory() as tmpdir:
@@ -49,17 +43,10 @@ class Toy1:
             ....:       optimization=OPTIMIZATION.SAT,
             ....:       granularity=GRANULARITY.BITWISE,
             ....:       linear_layer_modeling=LINEAR_LAYER_MODELING.EXCLUDE_ODD,
-            ....:       sat_solver=CRYPTOMINISAT_CVL(),
+            ....:       sat_solver=SOLVER.CRYPTOMINISAT,
             ....:       path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             382 variables and 1003 clauses were written to '...'
-            [  0 ,100] (trying w =  50) : SAT
-            [  0 , 50] (trying w =  25) : SAT
-            [  0 , 25] (trying w =  12) : SAT
-            [  0 , 12] (trying w =   6) : SAT
-            [  0 ,  6] (trying w =   3) : SAT
-            [  0 ,  3] (trying w =   1) : SAT
-            [  0 ,  1] (trying w =   0) : SAT
             0
             sage: with tempfile.TemporaryDirectory() as tmpdir:
             ....:   cipher = Toy1()
@@ -68,17 +55,10 @@ class Toy1:
             ....:       optimization=OPTIMIZATION.SAT,
             ....:       granularity=GRANULARITY.BITWISE,
             ....:       linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
-            ....:       sat_solver=CRYPTOMINISAT_CVL(),
+            ....:       sat_solver=SOLVER.CRYPTOMINISAT,
             ....:       path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             426 variables and 955 clauses were written to '...'
-            [  0 ,100] (trying w =  50) : SAT
-            [  0 , 50] (trying w =  25) : SAT
-            [  0 , 25] (trying w =  12) : SAT
-            [  0 , 12] (trying w =   6) : SAT
-            [  0 ,  6] (trying w =   3) : SAT
-            [  0 ,  3] (trying w =   1) : SAT
-            [  0 ,  1] (trying w =   0) : SAT
             0
 
         The test code for MILP:
@@ -93,17 +73,10 @@ class Toy1:
             ....:       optimization=OPTIMIZATION.MILP,
             ....:       granularity=GRANULARITY.BITWISE,
             ....:       linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
+            ....:       milp_solver=SOLVER.GUROBI,
             ....:       path=Path(tmpdir))
-            ....:   cipher.model(model_options=model_options)
-            ....:   GUROBI_CVL().solve(
-            ....:       input_file_name=Path(tmpdir) / "Toy1.mps",
-            ....:       output_file_name=Path(tmpdir) / "Toy1.sol",
-            ....:   )
-            ....:   GUROBI_CVL().process_solution_file(
-            ....:       solution_file_name=Path(tmpdir) / "Toy1.sol",
-            ....:   )[1]
+            ....:   cipher.analyse(model_options=model_options)
             474 variables and 346 constraints were written to '...'
-            ...
             0
             sage: from civerly.cipher_implementations.toy_ciphers.toy1 import Toy1
             sage: from civerly.model_options import *
@@ -115,17 +88,10 @@ class Toy1:
             ....:       optimization=OPTIMIZATION.MILP,
             ....:       granularity=GRANULARITY.BITWISE,
             ....:       linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
+            ....:       milp_solver=SOLVER.SCIP,
             ....:       path=Path(tmpdir))
-            ....:   cipher.model(model_options=model_options)
-            ....:   SCIP_CVL().solve(
-            ....:       input_file_name=Path(tmpdir) / "Toy1.mps",
-            ....:       output_file_name=Path(tmpdir) / "Toy1.sol",
-            ....:   )
-            ....:   SCIP_CVL().process_solution_file(
-            ....:       solution_file_name=Path(tmpdir) / "Toy1.sol",
-            ....:   )[1]
+            ....:   cipher.analyse(model_options=model_options)
             474 variables and 346 constraints were written to '...'
-            ...
             0
             sage: from civerly.cipher_implementations.toy_ciphers.toy1 import Toy1
             sage: from civerly.model_options import *
@@ -137,17 +103,10 @@ class Toy1:
             ....:       optimization=OPTIMIZATION.MILP,
             ....:       granularity=GRANULARITY.BITWISE,
             ....:       linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
+            ....:       milp_solver=SOLVER.GLPK,
             ....:       path=Path(tmpdir))
-            ....:   cipher.model(model_options=model_options)
-            ....:   GLPK_CVL().solve(
-            ....:       input_file_name=Path(tmpdir) / "Toy1.mps",
-            ....:       output_file_name=Path(tmpdir) / "Toy1.sol",
-            ....:   )
-            ....:   GLPK_CVL().process_solution_file(
-            ....:       solution_file_name=Path(tmpdir) / "Toy1.sol",
-            ....:   )[1]
+            ....:   cipher.analyse(model_options=model_options)
             474 variables and 346 constraints were written to '...'
-            ...
             0
             sage: from civerly.cipher_implementations.toy_ciphers.toy1 import Toy1
             sage: from civerly.model_options import *
@@ -158,7 +117,7 @@ class Toy1:
             ....:       cryptanalysis=CRYPTANALYSIS.LINEAR,
             ....:       optimization=OPTIMIZATION.MILP,
             ....:       granularity=GRANULARITY.BITWISE,
-            ....:       milp_solver=SCIP_CVL(),
+            ....:       milp_solver=SOLVER.SCIP,
             ....:       linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
             ....:       path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
@@ -174,7 +133,7 @@ class Toy1:
             [1, 0, 0, 1, 0, 1, 1, 1],
             [1, 1, 1, 1, 0, 1, 1, 1],
             [0, 0, 0, 0, 1, 0, 1, 0],
-            [1, 1, 0, 1, 1, 1, 0, 0]
+            [1, 1, 0, 1, 1, 1, 0, 0],
         ]
         mat = matrix(GF(2), 4, 8, arr)
         L1 = LinearLayer_CVL(mat, name="L(8->4)")
@@ -186,34 +145,31 @@ class Toy1:
             [1, 1, 0, 0],
             [0, 0, 0, 0],
             [0, 1, 0, 0],
-            [1, 0, 1, 1]
+            [1, 0, 1, 1],
         ]
         mat = matrix(GF(2), 8, 4, arr)
         L2 = LinearLayer_CVL(mat, name="L(4->8)")
 
         node1 = cipher.add_subcipher(P, [(cipher.IN, (i, i)) for i in range(16)])
-        node2 = cipher.add_subcipher(P, [(cipher.IN, (i+16, i)) for i in range(16)])
+        node2 = cipher.add_subcipher(P, [(cipher.IN, (i + 16, i)) for i in range(16)])
 
         node_new = [None for _ in range(4)]
         for j in range(4):
             node_new[j] = cipher.add_subcipher(
                 L1,
-                [
-                    (node1, (i + 4*j, i)) for i in range(4)
-                ] + [
-                    (node2, (i + 4*j, i + 4)) for i in range(4)
-                ]
+                [(node1, (i + 4 * j, i)) for i in range(4)]
+                + [(node2, (i + 4 * j, i + 4)) for i in range(4)],
             )
             node_new[j] = cipher.add_subcipher(
                 L2, [(node_new[j], (i, i)) for i in range(4)]
             )
-            cipher.add_output([(node_new[j], (i, i + 8*j)) for i in range(8)])
+            cipher.add_output([(node_new[j], (i, i + 8 * j)) for i in range(8)])
 
         cipher.add_output([(cipher.IN, (i, i)) for i in range(32, 37)])
 
         self.cipher = cipher
 
     def __new__(cls, *args, **kwargs):
-        instance = super(Toy1, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.cipher

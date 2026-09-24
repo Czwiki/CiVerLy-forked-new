@@ -1,9 +1,9 @@
+from sage.crypto.sboxes import PRESENT
 from sage.matrix.constructor import Matrix as matrix
 from sage.rings.finite_rings.finite_field_constructor import GF
-from sage.crypto.sboxes import PRESENT
+
+from civerly.component import I_CVL, LinearLayer_CVL, PermuteLayer_CVL, SBox_CVL
 from civerly.sboxcipher import SBoxCipher
-from civerly.component import LinearLayer_CVL, PermuteLayer_CVL, I_CVL
-from civerly.component import SBox_CVL
 
 
 # sbox cipher with missing structure of each layer
@@ -28,8 +28,8 @@ class Toy3:
             ....:       granularity=GRANULARITY.BITWISE,
             ....:       linear_layer_modeling=LINEAR_LAYER_MODELING.EXCLUDE_ODD,
             ....:       sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-            ....:       sat_solver=CRYPTOMINISAT_CVL(),
-            ....:       logic_minimizer=ESPRESSO_CVL(),
+            ....:       sat_solver=SOLVER.CRYPTOMINISAT,
+            ....:       logic_minimizer=SOLVER.ESPRESSO,
             ....:       path=Path(tmpdir))
             ....:   cipher.analyse(model_options)
             ....:   trail = str(cipher.get_trail(model_options))
@@ -42,32 +42,18 @@ class Toy3:
             ....:       granularity=GRANULARITY.BITWISE,
             ....:       linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
             ....:       sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-            ....:       sat_solver=CRYPTOMINISAT_CVL(),
-            ....:       logic_minimizer=ESPRESSO_CVL(),
+            ....:       sat_solver=SOLVER.CRYPTOMINISAT,
+            ....:       logic_minimizer=SOLVER.ESPRESSO,
             ....:       path=Path(tmpdir))
             ....:   cipher.analyse(model_options)
             ....:   trail = str(cipher.get_trail(model_options))
             ....:   assert "Unnamed Component" not in trail
             ....:   cipher.generate_report(model_options)
             798 variables and 3591 clauses were written to '...'
-            [  0 ,100] (trying w =  50) : SAT
-            [  0 , 50] (trying w =  25) : SAT
-            [  0 , 25] (trying w =  12) : SAT
-            [  0 , 12] (trying w =   6) : UNSAT
-            [  7 , 12] (trying w =   9) : SAT
-            [  7 ,  9] (trying w =   8) : SAT
-            [  7 ,  8] (trying w =   7) : UNSAT
             8
             Output file in: ...
             Using existing file ..., make sure it is up to date!
             812 variables and 3563 clauses were written to '...'
-            [  0 ,100] (trying w =  50) : SAT
-            [  0 , 50] (trying w =  25) : SAT
-            [  0 , 25] (trying w =  12) : SAT
-            [  0 , 12] (trying w =   6) : UNSAT
-            [  7 , 12] (trying w =   9) : SAT
-            [  7 ,  9] (trying w =   8) : SAT
-            [  7 ,  8] (trying w =   7) : UNSAT
             8
             Output file in: ...
 
@@ -86,7 +72,7 @@ class Toy3:
             ....:       granularity=GRANULARITY.BITWISE,
             ....:       linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
             ....:       sbox_modeling=SBOX_MODELING.CONVEX_HULL,
-            ....:       milp_solver=SCIP_CVL(),
+            ....:       milp_solver=SOLVER.SCIP,
             ....:       path=Path(tmpdir))
             ....:   cipher.analyse(model_options)
             ....:   trail = str(cipher.get_trail(model_options))
@@ -95,90 +81,51 @@ class Toy3:
             854 variables and 1313 constraints were written to '...'
             8
             Output file in: ...
-
-        Test multi-step modeling with external Espresso reduction::
-
-            sage: # optional - cryptominisat # optional - espresso
-            sage: from civerly.cipher_implementations.toy_ciphers.toy3 \
-            ....:   import Toy3
-            sage: from civerly.model_options import *
-            sage: import tempfile, os
-            sage: with tempfile.TemporaryDirectory() as tmpdir:
-            ....:   cipher = Toy3()
-            ....:   model_options = MODEL_OPTIONS(
-            ....:       cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
-            ....:       optimization=OPTIMIZATION.SAT,
-            ....:       granularity=GRANULARITY.BITWISE,
-            ....:       linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
-            ....:       sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-            ....:       sat_solver=CRYPTOMINISAT_CVL(),
-            ....:       logic_minimizer=None,
-            ....:       path=Path(tmpdir))
-            ....:   cipher.analyse(model_options)
-            ....:   _ = os.popen(
-            ....:       f"espresso -epos {tmpdir}/espresso-5a255793_in.pla > "
-            ....:       f"{tmpdir}/espresso-5a255793_out.pla"
-            ....:   ).read()
-            ....:   cipher.analyse(model_options)
-            Optimization problem for Espresso has been written to...
-            Using existing file ..., make sure it is up to date!
-            812 variables and 3563 clauses were written to '...'
-            [  0 ,100] (trying w =  50) : SAT
-            [  0 , 50] (trying w =  25) : SAT
-            [  0 , 25] (trying w =  12) : SAT
-            [  0 , 12] (trying w =   6) : UNSAT
-            [  7 , 12] (trying w =   9) : SAT
-            [  7 ,  9] (trying w =   8) : SAT
-            [  7 ,  8] (trying w =   7) : UNSAT
-            8
-
-
         """
         cipher = SBoxCipher(32, 32, name="Toy3")
         S = SBox_CVL(PRESENT, name="S")
-        mat = matrix(GF(2), [
-            [1, 0, 0, 1],
-            [1, 0, 1, 0],
-            [0, 0, 1, 0],
-            [1, 1, 1, 1]
-        ])
+        mat = matrix(GF(2), [[1, 0, 0, 1], [1, 0, 1, 0], [0, 0, 1, 0], [1, 1, 1, 1]])
         L = LinearLayer_CVL(mat, name="L")
-        P = PermuteLayer_CVL([
-            7, 5, 6, 1, 2, 3, 0, 4
-        ], word_coarseness=4, name="P")
+        P = PermuteLayer_CVL([7, 5, 6, 1, 2, 3, 0, 4], word_coarseness=4, name="P")
         edge_arr = []
         for j in range(8):
             if j == 5:
                 continue
-            node = cipher.add_subcipher(S, [(cipher.IN, (i+4*j, i)) for i in range(4)])
+            node = cipher.add_subcipher(
+                S, [(cipher.IN, (i + 4 * j, i)) for i in range(4)]
+            )
             node = cipher.add_subcipher(S, [(node, (i, 3 - i)) for i in range(4)])
-            node = cipher.add_subcipher(S, [(node, ((i+1) % 4, i)) for i in range(4)])
+            node = cipher.add_subcipher(S, [(node, ((i + 1) % 4, i)) for i in range(4)])
             node = cipher.add_subcipher(S, [(node, (i, i)) for i in range(4)])
             node = cipher.add_subcipher(L, [(node, (i, i)) for i in range(4)])
-            edge_arr += [(node, (i, i+4*j)) for i in range(4)]
+            edge_arr += [(node, (i, i + 4 * j)) for i in range(4)]
 
         I = I_CVL(4, name="I(4)")  # noqa: E741
 
-        node = cipher.add_subcipher(S, [(cipher.IN, (i+4*5, i)) for i in range(4)])
+        node = cipher.add_subcipher(S, [(cipher.IN, (i + 4 * 5, i)) for i in range(4)])
         node = cipher.add_subcipher(I, [(node, (i, 3 - i)) for i in range(4)])
-        node = cipher.add_subcipher(I, [(node, ((i+1) % 4, i)) for i in range(4)])
+        node = cipher.add_subcipher(I, [(node, ((i + 1) % 4, i)) for i in range(4)])
         node = cipher.add_subcipher(I, [(node, (3 - i, i)) for i in range(4)])
         node = cipher.add_subcipher(S, [(node, (i, i)) for i in range(4)])
-        edge_arr += [(node, (i, i+4*5)) for i in range(4)]
+        edge_arr += [(node, (i, i + 4 * 5)) for i in range(4)]
 
         node_out = cipher.add_subcipher(P, edge_arr)
 
         for j in range(4):
-            node = cipher.add_subcipher(S, [(node_out, ((i+4*j + 3) % 16, i)) for i in range(4)])
+            node = cipher.add_subcipher(
+                S, [(node_out, ((i + 4 * j + 3) % 16, i)) for i in range(4)]
+            )
             node = cipher.add_subcipher(S, [(node, (i, i)) for i in range(4)])
-            cipher.add_output([(node, (i, i+4*j)) for i in range(4)])
+            cipher.add_output([(node, (i, i + 4 * j)) for i in range(4)])
         for j in range(4, 8):
-            node = cipher.add_subcipher(S, [(node_out, (i+4*j, i)) for i in range(4)])
-            cipher.add_output([(node, (i, i+4*j)) for i in range(4)])
+            node = cipher.add_subcipher(
+                S, [(node_out, (i + 4 * j, i)) for i in range(4)]
+            )
+            cipher.add_output([(node, (i, i + 4 * j)) for i in range(4)])
 
         self.cipher = cipher
 
     def __new__(cls, *args, **kwargs):
-        instance = super(Toy3, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.cipher

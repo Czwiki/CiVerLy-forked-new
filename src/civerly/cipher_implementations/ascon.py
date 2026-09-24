@@ -1,21 +1,21 @@
-from civerly.sboxcipher import SBoxCipher
-from civerly.wordsboxcipher import WordSBoxCipher
-from civerly.component import SBox_CVL, RoundkeyXOR_CVL, LinearLayer_CVL
 from sage.crypto.sboxes import Ascon as ascon_S
-
-from sage.rings.finite_rings.finite_field_constructor import GF
 from sage.matrix.special import circulant
 from sage.modules.free_module_element import vector
+from sage.rings.finite_rings.finite_field_constructor import GF
+
+from civerly.component import LinearLayer_CVL, RoundkeyXOR_CVL, SBox_CVL
+from civerly.sboxcipher import SBoxCipher
+from civerly.wordsboxcipher import WordSBoxCipher
 
 
 class ASCON_CVL:
-    def __init__(self, R=12, name=None):
+    def __init__(self, R=12, name="Ascon"):
         r"""
         The CiVerLy implementation of ASCON. It takes the following arguments:
 
             - ``R`` -- integer; Number of rounds.
 
-            - ``name`` -- string; The name of the cipher (optional).
+            - ``name`` -- string; The name of the cipher (default: "Ascon").
               Will be used to name the cipher and the corresponding files
               generated (such as the reports and cipher graphs).
 
@@ -43,8 +43,8 @@ class ASCON_CVL:
             ....:     granularity=GRANULARITY.BITWISE,
             ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
             ....:     linear_layer_modeling=LINEAR_LAYER_MODELING.EXCLUDE_ODD,
-            ....:     sat_solver=CRYPTOMINISAT_CVL(),
-            ....:     logic_minimizer=ESPRESSO_CVL(),
+            ....:     sat_solver=SOLVER.CRYPTOMINISAT,
+            ....:     logic_minimizer=SOLVER.ESPRESSO,
             ....:     solve_range=(7, 9),
             ....:     path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
@@ -52,21 +52,17 @@ class ASCON_CVL:
             ....:   trail = str(cipher.get_trail(model_options))
             ....:   assert "Unnamed Component" not in trail
             20384 variables and 51649 clauses were written to '...'
-            [  7 ,  9] (trying w =   8) : SAT
-            [  7 ,  8] (trying w =   7) : UNSAT
             8
             Output file in: ...
 
 
         """
-        if name is None:
-            name = "ascon"
 
         constants = [
             0xf0, 0xe1, 0xd2, 0xc3,
             0xb4, 0xa5, 0x96, 0x87,
-            0x78, 0x69, 0x5a, 0x4b
-        ]
+            0x78, 0x69, 0x5a, 0x4b,
+        ]  # fmt: skip
 
         s = SBox_CVL(ascon_S, name="SBox")
 
@@ -117,16 +113,15 @@ class ASCON_CVL:
         # Implementation of ASCON-round
         ascon_round = SBoxCipher(320, 320, name="ascon_round")
         node = ascon_round.add_subcipher(
-            const_add,
-            [(ascon_round.IN, (i, i)) for i in range(320)]
+            const_add, [(ascon_round.IN, (i, i)) for i in range(320)]
         )
         node = ascon_round.add_subcipher(
             sbox_layer,
-            [(node, (64*i + j, 5*j + i)) for j in range(64) for i in range(5)]
+            [(node, (64 * i + j, 5 * j + i)) for j in range(64) for i in range(5)],
         )
         node = ascon_round.add_subcipher(
             linear_layer,
-            [(node, (5*j + i, 64*i + j)) for j in range(64) for i in range(5)]
+            [(node, (5 * j + i, 64 * i + j)) for j in range(64) for i in range(5)],
         )
 
         ascon_round.add_output([(node, (i, i)) for i in range(320)])
@@ -141,14 +136,12 @@ class ASCON_CVL:
             node_round_start = ascon_cipher.add_subcipher(
                 ascon_round, [(node_round_start, (i, i)) for i in range(320)]
             )
-        ascon_cipher.add_output(
-            [(node_round_start, (i, i)) for i in range(320)]
-        )
+        ascon_cipher.add_output([(node_round_start, (i, i)) for i in range(320)])
         # ------------------------------------------------ #
 
         self.ascon_cipher = ascon_cipher
 
     def __new__(cls, *args, **kwargs):
-        instance = super(ASCON_CVL, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.ascon_cipher

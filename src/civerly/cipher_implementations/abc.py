@@ -1,17 +1,30 @@
 from sage.crypto.sbox import SBox
+
+from civerly.component import (
+    XOR_CVL,
+    PermuteLayer_CVL,
+    RotateLayer_CVL,
+    RoundkeyXOR_CVL,
+    SBox_CVL,
+)
 from civerly.sboxcipher import SBoxCipher
-from civerly.component import PermuteLayer_CVL, SBox_CVL, RotateLayer_CVL
-from civerly.component import RoundkeyXOR_CVL, XOR_CVL
 
 
 class ABC_CVL:
-    def __init__(self, R=16, rks=[], name=None):
+    def __init__(self, R=16, rks=None, name="ABC"):
         r"""
         The ABC cipher, a 128 bit block size Feistel cipher patented by Apple
         and first analysed in
         https://link.springer.com/chapter/10.1007/978-3-031-56232-7_13.
         The main weakness is the lack of diffusion between each byte of
-        the state, which CiVerLy also recognizes.
+        the state, which CiVerLy also finds. It takes the
+        following arguments:
+
+            - ``R`` -- integer; Number of rounds (default 16)
+
+            - ``rks`` -- list[int]; The round keys (default [])
+
+            - ``name`` -- string; The object's name (default "ABC")
 
 
         TESTS:
@@ -87,24 +100,17 @@ class ABC_CVL:
             ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
             ....:     linear_layer_modeling=LINEAR_LAYER_MODELING.EXCLUDE_ODD,
             ....:     solve_range=(0, 10),
-            ....:     sat_solver=CRYPTOMINISAT_CVL(),
-            ....:     logic_minimizer=ESPRESSO_CVL(),
+            ....:     sat_solver=SOLVER.CRYPTOMINISAT,
+            ....:     logic_minimizer=SOLVER.ESPRESSO,
             ....:     path=Path(tmpdir)
             ....:   )
             ....:   abc_cipher.analyse(model_options)
             12640 variables and 44257 clauses were written to '...'
-            [  0 , 10] (trying w =   5) : SAT
-            [  0 ,  5] (trying w =   2) : UNSAT
-            [  3 ,  5] (trying w =   4) : SAT
-            [  3 ,  4] (trying w =   3) : SAT
             3
 
         """
-        if rks == []:
+        if not rks:
             rks = [0x0 for _ in range(R)]
-
-        if name is None:
-            name = "ABC"
 
         cipher = SBoxCipher(128, 128, name=name)
         abc_round = SBoxCipher(128, 128, name="ABC-round")
@@ -117,20 +123,21 @@ class ABC_CVL:
 
         for j in range(8):
             node = smallR.add_subcipher(
-                RotateLayer_CVL(8, j, name=f"r{j}"), [(smallR.IN, (i + 8*j, i)) for i in range(8)]
+                RotateLayer_CVL(8, j, name=f"r{j}"),
+                [(smallR.IN, (i + 8 * j, i)) for i in range(8)],
             )
-            smallR.add_output([(node, (i, i + 8*j)) for i in range(8)])
+            smallR.add_output([(node, (i, i + 8 * j)) for i in range(8)])
 
         sb = SBox_CVL(SBox([
             0x4, 0xc, 0x0, 0x8, 0x6, 0xe, 0x1, 0xb,
             0x9, 0xd, 0x2, 0x5, 0xa, 0xf, 0x3, 0x7
-        ]), name="S")
+        ]), name="S")  # fmt: skip
         sb_layer = SBoxCipher(64, 64, name="S-Layer")
         for j in range(16):
-            node = sb_layer.add_subcipher(sb, [
-                (sb_layer.IN, (i + 4*j, i)) for i in range(4)
-            ])
-            sb_layer.add_output([(node, (i, i + 4*j)) for i in range(4)])
+            node = sb_layer.add_subcipher(
+                sb, [(sb_layer.IN, (i + 4 * j, i)) for i in range(4)]
+            )
+            sb_layer.add_output([(node, (i, i + 4 * j)) for i in range(4)])
 
         bs = SBox_CVL(SBox([
             0x9b, 0x9e, 0xa1, 0xa4, 0xa7, 0xaa, 0xad, 0xb0, 0xb3, 0xb6, 0xb9,
@@ -157,33 +164,33 @@ class ABC_CVL:
             0x50, 0x53, 0x56, 0x59, 0x5c, 0x5f, 0x62, 0x65, 0x68, 0x6b, 0x6e,
             0x71, 0x74, 0x77, 0x7a, 0x7d, 0x80, 0x83, 0x86, 0x89, 0x8c, 0x8f,
             0x92, 0x95, 0x98
-        ], name="BS"))
+        ], name="BS"))  # fmt: skip
 
         bs_layer = SBoxCipher(64, 64, name="BS-Layer")
         for j in range(8):
-            node = bs_layer.add_subcipher(bs, [
-                (bs_layer.IN, (i + 8*j, i)) for i in range(8)
-            ])
-            bs_layer.add_output([(node, (i, i + 8*j)) for i in range(8)])
+            node = bs_layer.add_subcipher(
+                bs, [(bs_layer.IN, (i + 8 * j, i)) for i in range(8)]
+            )
+            bs_layer.add_output([(node, (i, i + 8 * j)) for i in range(8)])
 
-        node_rk = abc_round.add_subcipher(rk, [
-            (abc_round.IN, (i + 64, i)) for i in range(64)
-        ])
-        node_s = abc_round.add_subcipher(sb_layer, [
-            (node_rk, (i, i)) for i in range(64)
-        ])
-        node_r = abc_round.add_subcipher(smallR, [
-            (node_s, (i, i)) for i in range(64)
-        ])
-        node_bigr = abc_round.add_subcipher(bigR, [
-            (abc_round.IN, (i, i)) for i in range(64)
-        ])
-        node_xor = abc_round.add_subcipher(xor, [
-            (node_r, (i, i)) for i in range(64)
-        ] + [(node_bigr, (i, i + 64)) for i in range(64)])
-        node_bs = abc_round.add_subcipher(bs_layer, [
-            (node_xor, (i, i)) for i in range(64)
-        ])
+        node_rk = abc_round.add_subcipher(
+            rk, [(abc_round.IN, (i + 64, i)) for i in range(64)]
+        )
+        node_s = abc_round.add_subcipher(
+            sb_layer, [(node_rk, (i, i)) for i in range(64)]
+        )
+        node_r = abc_round.add_subcipher(smallR, [(node_s, (i, i)) for i in range(64)])
+        node_bigr = abc_round.add_subcipher(
+            bigR, [(abc_round.IN, (i, i)) for i in range(64)]
+        )
+        node_xor = abc_round.add_subcipher(
+            xor,
+            [(node_r, (i, i)) for i in range(64)]
+            + [(node_bigr, (i, i + 64)) for i in range(64)],
+        )
+        node_bs = abc_round.add_subcipher(
+            bs_layer, [(node_xor, (i, i)) for i in range(64)]
+        )
 
         abc_round.add_output([(node_bs, (i, i + 64)) for i in range(64)])
         abc_round.add_output([(abc_round.IN, (i + 64, i)) for i in range(64)])
@@ -191,14 +198,12 @@ class ABC_CVL:
         node = cipher.IN
         for r in range(R):
             abc_round.nodes[node_rk].const = rks[r]
-            node = cipher.add_subcipher(abc_round, [
-                (node, (i, i)) for i in range(128)
-            ])
+            node = cipher.add_subcipher(abc_round, [(node, (i, i)) for i in range(128)])
         cipher.add_output([(node, (i, i)) for i in range(128)])
 
         self.cipher = cipher
 
     def __new__(cls, *args, **kwargs):
-        instance = super(ABC_CVL, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.cipher

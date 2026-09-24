@@ -1,24 +1,55 @@
-from sage.rings.finite_rings.finite_field_constructor import GF
-from sage.matrix.constructor import Matrix as matrix
 from sage.crypto.sbox import SBox as SBox_sage
-from sage.crypto.sboxes import DES_S1_1, DES_S1_2, DES_S1_3, DES_S1_4
-from sage.crypto.sboxes import DES_S2_1, DES_S2_2, DES_S2_3, DES_S2_4
-from sage.crypto.sboxes import DES_S3_1, DES_S3_2, DES_S3_3, DES_S3_4
-from sage.crypto.sboxes import DES_S4_1, DES_S4_2, DES_S4_3, DES_S4_4
-from sage.crypto.sboxes import DES_S5_1, DES_S5_2, DES_S5_3, DES_S5_4
-from sage.crypto.sboxes import DES_S6_1, DES_S6_2, DES_S6_3, DES_S6_4
-from sage.crypto.sboxes import DES_S7_1, DES_S7_2, DES_S7_3, DES_S7_4
-from sage.crypto.sboxes import DES_S8_1, DES_S8_2, DES_S8_3, DES_S8_4
+from sage.crypto.sboxes import (
+    DES_S1_1,
+    DES_S1_2,
+    DES_S1_3,
+    DES_S1_4,
+    DES_S2_1,
+    DES_S2_2,
+    DES_S2_3,
+    DES_S2_4,
+    DES_S3_1,
+    DES_S3_2,
+    DES_S3_3,
+    DES_S3_4,
+    DES_S4_1,
+    DES_S4_2,
+    DES_S4_3,
+    DES_S4_4,
+    DES_S5_1,
+    DES_S5_2,
+    DES_S5_3,
+    DES_S5_4,
+    DES_S6_1,
+    DES_S6_2,
+    DES_S6_3,
+    DES_S6_4,
+    DES_S7_1,
+    DES_S7_2,
+    DES_S7_3,
+    DES_S7_4,
+    DES_S8_1,
+    DES_S8_2,
+    DES_S8_3,
+    DES_S8_4,
+)
+from sage.matrix.constructor import Matrix as matrix
+from sage.rings.finite_rings.finite_field_constructor import GF
 
+from civerly.component import (
+    XOR_CVL,
+    LinearLayer_CVL,
+    PermuteLayer_CVL,
+    RoundkeyXOR_CVL,
+    SBox_CVL,
+)
 from civerly.sboxcipher import SBoxCipher
-from civerly.component import LinearLayer_CVL, PermuteLayer_CVL, XOR_CVL
-from civerly.component import SBox_CVL, RoundkeyXOR_CVL
 
 
 class DES_F_CVL:
     def __init__(self):
         r"""
-        The implementation of DES-F.
+        The implementation of DES-F, taking no arguments.
         The test vectors are taken from
         https://crypto.stackexchange.com/questions/65996/64-des-full-example-with-all-the-stages.
 
@@ -45,14 +76,12 @@ class DES_F_CVL:
             ....:     granularity=GRANULARITY.BITWISE,
             ....:     linear_layer_modeling=LINEAR_LAYER_MODELING.EXCLUDE_ODD,
             ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-            ....:     sat_solver=CRYPTOMINISAT_CVL(),
-            ....:     logic_minimizer=ESPRESSO_CVL(),
+            ....:     sat_solver=SOLVER.CRYPTOMINISAT,
+            ....:     logic_minimizer=SOLVER.ESPRESSO,
             ....:     solve_range=(0, 4),
             ....:     path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             582 variables and 4612 clauses were written to '...'
-            [  0 ,  4] (trying w =   2) : SAT
-            [  0 ,  2] (trying w =   1) : UNSAT
             2
 
             sage: from civerly.cipher_implementations.des import DES_F_CVL
@@ -66,14 +95,12 @@ class DES_F_CVL:
             ....:     granularity=GRANULARITY.BITWISE,
             ....:     linear_layer_modeling=LINEAR_LAYER_MODELING.EXCLUDE_ODD,
             ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-            ....:     sat_solver=CADICAL_CVL(),
-            ....:     logic_minimizer=ESPRESSO_CVL(),
+            ....:     sat_solver=SOLVER.CADICAL,
+            ....:     logic_minimizer=SOLVER.ESPRESSO,
             ....:     solve_range=(0, 4),
             ....:     path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             582 variables and 4612 clauses were written to '...'
-            [  0 ,  4] (trying w =   2) : SAT
-            [  0 ,  2] (trying w =   1) : UNSAT
             2
 
         Using MILP modeling::
@@ -89,8 +116,8 @@ class DES_F_CVL:
             ....:     granularity=GRANULARITY.BITWISE,
             ....:     linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
             ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-            ....:     milp_solver=SCIP_CVL(),
-            ....:     logic_minimizer=ESPRESSO_CVL(),
+            ....:     milp_solver=SOLVER.SCIP,
+            ....:     logic_minimizer=SOLVER.ESPRESSO,
             ....:     path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             ....:   cipher.generate_report(model_options=model_options)
@@ -109,8 +136,8 @@ class DES_F_CVL:
             16, 17, 18, 19, 20, 21,
             20, 21, 22, 23, 24, 25,
             24, 25, 26, 27, 28, 29,
-            28, 29, 30, 31, 32,  1
-        ]
+            28, 29, 30, 31, 32,  1,
+        ]  # fmt: skip
         arr = [[0 for _ in range(32)] for _ in range(len(e_table))]
         for i in range(len(e_table)):
             arr[i][e_table[i] - 1] = 1
@@ -125,7 +152,7 @@ class DES_F_CVL:
             [DES_S5_1, DES_S5_2, DES_S5_3, DES_S5_4],
             [DES_S6_1, DES_S6_2, DES_S6_3, DES_S6_4],
             [DES_S7_1, DES_S7_2, DES_S7_3, DES_S7_4],
-            [DES_S8_1, DES_S8_2, DES_S8_3, DES_S8_4]
+            [DES_S8_1, DES_S8_2, DES_S8_3, DES_S8_4],
         ]
 
         S_new = []
@@ -133,9 +160,7 @@ class DES_F_CVL:
         for n, sb in enumerate(S_arr):
             S_new.append([])
             for i in range(64):
-                S_new[n].append(
-                    sb[(((i >> 5) & 1) << 1) | (i & 1)][(i >> 1) & 0xf]
-                )
+                S_new[n].append(sb[(((i >> 5) & 1) << 1) | (i & 1)][(i >> 1) & 0xF])
 
         # SBox_CVL is CiVerLy component, SBox_sage is SageMath-SBox object
         S = [SBox_CVL(SBox_sage(s), name=f"S{i}") for i, s in enumerate(S_new)]
@@ -147,44 +172,46 @@ class DES_F_CVL:
             2,  8, 24, 14,
             32, 27,  3,  9,
             19, 13, 30,  6,
-            22, 11,  4, 25
-        ]
-        permute = PermuteLayer_CVL([p-1 for p in P_perm], name="P").inv()
+            22, 11,  4, 25,
+        ]  # fmt: skip
+        permute = PermuteLayer_CVL([p - 1 for p in P_perm], name="P").inv()
         key_add = RoundkeyXOR_CVL(48, 0x0, name="key_add")
 
         # ---------------------------- F ------------------------------------ #
-        e_node = f.add_subcipher(
-            E, [(f.IN, (i, i)) for i in range(32)]
-        )
-        rk_node = f.add_subcipher(
-            key_add, [(e_node, (i, i)) for i in range(48)]
-        )
-        s_nodes = [f.add_subcipher(
-            S[s], [(rk_node, (i + 6*s, i)) for i in range(6)])
+        e_node = f.add_subcipher(E, [(f.IN, (i, i)) for i in range(32)])
+        rk_node = f.add_subcipher(key_add, [(e_node, (i, i)) for i in range(48)])
+        s_nodes = [
+            f.add_subcipher(S[s], [(rk_node, (i + 6 * s, i)) for i in range(6)])
             for s in range(8)
         ]
         p_node = f.add_subcipher(
-            permute, [
-                (nod, (i, i + 4*n))
-                for i in range(4)
-                for n, nod in enumerate(s_nodes)
-            ]
+            permute,
+            [(nod, (i, i + 4 * n)) for i in range(4) for n, nod in enumerate(s_nodes)],
         )
         f.add_output([(p_node, (i, i)) for i in range(32)])
         # ------------------------------------------------------------------- #
         self.f = f
 
     def __new__(cls, *args, **kwargs):
-        instance = super(DES_F_CVL, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.f
 
 
 class DES_CVL:
-    def __init__(self, R, rks=[], name=None) -> None:
+    def __init__(self, R, rks=None, name="DES") -> None:
         r"""
         The DES implementation.
         The test vectors are taken from https://crypto.stackexchange.com/questions/65996/64-des-full-example-with-all-the-stages.
+        It takes the following arguments:
+
+            - ``R`` -- integer; Number of rounds.
+
+            - ``rks`` -- list[int]; The round keys (default [])
+
+            - ``name`` -- string; The name of the cipher (default: "DES").
+              Will be used to name the cipher and the corresponding files
+              generated (such as the reports and cipher graphs).
 
         TESTS::
 
@@ -220,25 +247,18 @@ class DES_CVL:
             ....:     granularity=GRANULARITY.BITWISE,
             ....:     linear_layer_modeling=LINEAR_LAYER_MODELING.EXCLUDE_ODD,
             ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-            ....:     sat_solver=CRYPTOMINISAT_CVL(),
-            ....:     logic_minimizer=ESPRESSO_CVL(),
+            ....:     sat_solver=SOLVER.CRYPTOMINISAT,
+            ....:     logic_minimizer=SOLVER.ESPRESSO,
             ....:     solve_range=(0, 10),
             ....:     path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             ....:   trail = str(cipher.get_trail(model_options))
             ....:   assert "Unnamed Component" not in trail
             3826 variables and 18250 clauses were written to '...'
-            [  0 , 10] (trying w =   5) : SAT
-            [  0 ,  5] (trying w =   2) : UNSAT
-            [  3 ,  5] (trying w =   4) : SAT
-            [  3 ,  4] (trying w =   3) : UNSAT
             4
 
         """
-        if name is None:
-            name = "DES"
-
-        if rks == []:
+        if not rks:
             rks = [0 for _ in range(R)]  # default to zero keys
 
         des = SBoxCipher(64, 64, name=name)
@@ -253,8 +273,8 @@ class DES_CVL:
             56, 48, 40, 32, 24, 16, 8,  0,
             58, 50, 42, 34, 26, 18, 10, 2,
             60, 52, 44, 36, 28, 20, 12, 4,
-            62, 54, 46, 38, 30, 22, 14, 6
-        ]
+            62, 54, 46, 38, 30, 22, 14, 6,
+        ]  # fmt: skip
         ip = PermuteLayer_CVL(ip_arr, name="IP").inv()
 
         f = DES_F_CVL()
@@ -265,19 +285,12 @@ class DES_CVL:
         )
         xor_node = round_function.add_subcipher(
             xor,
-            [
-                (f_node, (i, i)) for i in range(32)
-            ] + [
-                (round_function.IN, (i, i + 32)) for i in range(32)
-            ]
+            [(f_node, (i, i)) for i in range(32)]
+            + [(round_function.IN, (i, i + 32)) for i in range(32)],
         )
 
-        round_function.add_output(
-            [(round_function.IN, (i + 32, i)) for i in range(32)]
-        )
-        round_function.add_output(
-            [(xor_node, (i, i + 32)) for i in range(32)]
-        )
+        round_function.add_output([(round_function.IN, (i + 32, i)) for i in range(32)])
+        round_function.add_output([(xor_node, (i, i + 32)) for i in range(32)])
         # ------------------------------------------------------------------- #
 
         # ----------------------------- DES --------------------------------- #
@@ -296,6 +309,6 @@ class DES_CVL:
         self.des = des
 
     def __new__(cls, *args, **kwargs):
-        instance = super(DES_CVL, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.des

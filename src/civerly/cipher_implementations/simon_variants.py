@@ -1,12 +1,37 @@
 from civerly.andrx import AndRX
-from civerly.component import AND_CVL, XOR_CVL, RotateLayer_CVL, RoundkeyXOR_CVL
-from civerly.component import ROT_AND_CVL
+from civerly.component import (
+    AND_CVL,
+    ROT_AND_CVL,
+    XOR_CVL,
+    RotateLayer_CVL,
+    RoundkeyXOR_CVL,
+)
 
 
 class SIMON_Variants_CVL:
-    def __init__(self, block_size, R, params=[8, 1, 2], rks=[],
-                 use_rotand=True, name=None):
+    def __init__(
+        self, block_size, R, params=None, rks=None, use_rotand=True, name="Simon"
+    ):
         r"""
+        CiVerLy implementation of SIMON-like ciphers. It takes the following parameters:
+
+            - ``block_size`` -- integer; the block size.
+
+            - ``R`` -- integer; the number of rounds.
+
+            - ``params`` -- [int, int, int]; the rotation constants a, b, c, specifying
+              the specific SIMON variant.
+
+            - ``rks`` -- list[int]; the round keys (default: []).
+
+            - ``use_rotand`` -- bool; Indicates whether the ``ROT_AND_CVL`` component
+              and its more accurate model from (https://eprint.iacr.org/2015/145)
+              should be used.
+
+            - ``name`` -- string; The name (default: "Simon").
+              Will be used to name the cipher and the corresponding files
+              generated (such as the reports and cipher graphs).
+
         TESTS::
 
             sage: from civerly.cipher_implementations.simon import SIMON_CVL
@@ -33,15 +58,12 @@ class SIMON_Variants_CVL:
             ....:     optimization=OPTIMIZATION.SAT,
             ....:     granularity=GRANULARITY.BITWISE,
             ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-            ....:     sat_solver=CRYPTOMINISAT_CVL(),
-            ....:     logic_minimizer=ESPRESSO_CVL(),
+            ....:     sat_solver=SOLVER.CRYPTOMINISAT,
+            ....:     logic_minimizer=SOLVER.ESPRESSO,
             ....:     solve_range=(4, 10),
             ....:     path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             2982 variables and 6861 clauses were written to '...'
-            [  4 , 10] (trying w =   7) : UNSAT
-            [  8 , 10] (trying w =   9) : SAT
-            [  8 ,  9] (trying w =   8) : SAT
             8
 
             sage: from civerly.cipher_implementations.simon_variants \
@@ -56,15 +78,12 @@ class SIMON_Variants_CVL:
             ....:     optimization=OPTIMIZATION.SAT,
             ....:     granularity=GRANULARITY.BITWISE,
             ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-            ....:     sat_solver=CRYPTOMINISAT_CVL(),
-            ....:     logic_minimizer=ESPRESSO_CVL(),
+            ....:     sat_solver=SOLVER.CRYPTOMINISAT,
+            ....:     logic_minimizer=SOLVER.ESPRESSO,
             ....:     solve_range=(4, 10),
             ....:     path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             3216 variables and 7329 clauses were written to '...'
-            [  4 , 10] (trying w =   7) : SAT
-            [  4 ,  7] (trying w =   5) : UNSAT
-            [  6 ,  7] (trying w =   6) : SAT
             6
 
             sage: from civerly.cipher_implementations.simon_variants \
@@ -79,15 +98,12 @@ class SIMON_Variants_CVL:
             ....:     optimization=OPTIMIZATION.SAT,
             ....:     granularity=GRANULARITY.BITWISE,
             ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-            ....:     sat_solver=CRYPTOMINISAT_CVL(),
-            ....:     logic_minimizer=ESPRESSO_CVL(),
+            ....:     sat_solver=SOLVER.CRYPTOMINISAT,
+            ....:     logic_minimizer=SOLVER.ESPRESSO,
             ....:     solve_range=(4, 10),
             ....:     path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             2982 variables and 6861 clauses were written to '...'
-            [  4 , 10] (trying w =   7) : UNSAT
-            [  8 , 10] (trying w =   9) : UNSAT
-            [ 10 , 10] (trying w =  10) : SAT
             10
 
             sage: from civerly.cipher_implementations.simon_variants \
@@ -102,15 +118,12 @@ class SIMON_Variants_CVL:
             ....:     optimization=OPTIMIZATION.SAT,
             ....:     granularity=GRANULARITY.BITWISE,
             ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-            ....:     sat_solver=CRYPTOMINISAT_CVL(),
-            ....:     logic_minimizer=ESPRESSO_CVL(),
+            ....:     sat_solver=SOLVER.CRYPTOMINISAT,
+            ....:     logic_minimizer=SOLVER.ESPRESSO,
             ....:     solve_range=(8, 16),
             ....:     path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             2982 variables and 6861 clauses were written to '...'
-            [  8 , 16] (trying w =  12) : SAT
-            [  8 , 12] (trying w =  10) : UNSAT
-            [ 11 , 12] (trying w =  11) : UNSAT
             12
 
         As stated in [KLT15], there exist parameters which yield an optimal
@@ -129,14 +142,12 @@ class SIMON_Variants_CVL:
             ....:     optimization=OPTIMIZATION.SAT,
             ....:     granularity=GRANULARITY.BITWISE,
             ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-            ....:     sat_solver=CRYPTOMINISAT_CVL(),
-            ....:     logic_minimizer=ESPRESSO_CVL(),
+            ....:     sat_solver=SOLVER.CRYPTOMINISAT,
+            ....:     logic_minimizer=SOLVER.ESPRESSO,
             ....:     solve_range=(24, 26),
             ....:     path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             4842 variables and 11221 clauses were written to '...'
-            [ 24 , 26] (trying w =  25) : SAT
-            [ 24 , 25] (trying w =  24) : UNSAT
             25
 
             sage: from civerly.cipher_implementations.simon_variants \
@@ -151,14 +162,12 @@ class SIMON_Variants_CVL:
             ....:     optimization=OPTIMIZATION.SAT,
             ....:     granularity=GRANULARITY.BITWISE,
             ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-            ....:     sat_solver=CRYPTOMINISAT_CVL(),
-            ....:     logic_minimizer=ESPRESSO_CVL(),
+            ....:     sat_solver=SOLVER.CRYPTOMINISAT,
+            ....:     logic_minimizer=SOLVER.ESPRESSO,
             ....:     solve_range=(24, 26),
             ....:     path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             4842 variables and 11221 clauses were written to '...'
-            [ 24 , 26] (trying w =  25) : UNSAT
-            [ 26 , 26] (trying w =  26) : SAT
             26
 
             sage: from civerly.cipher_implementations.simon_variants \
@@ -173,14 +182,12 @@ class SIMON_Variants_CVL:
             ....:     optimization=OPTIMIZATION.SAT,
             ....:     granularity=GRANULARITY.BITWISE,
             ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-            ....:     sat_solver=CRYPTOMINISAT_CVL(),
-            ....:     logic_minimizer=ESPRESSO_CVL(),
+            ....:     sat_solver=SOLVER.CRYPTOMINISAT,
+            ....:     logic_minimizer=SOLVER.ESPRESSO,
             ....:     solve_range=(24, 26),
             ....:     path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             4842 variables and 11221 clauses were written to '...'
-            [ 24 , 26] (trying w =  25) : UNSAT
-            [ 26 , 26] (trying w =  26) : SAT
             26
 
         Scaling every parameter in SIMON by the same amount should leave
@@ -202,8 +209,8 @@ class SIMON_Variants_CVL:
             ....:     optimization=OPTIMIZATION.SAT,
             ....:     granularity=GRANULARITY.BITWISE,
             ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-            ....:     sat_solver=CRYPTOMINISAT_CVL(),
-            ....:     logic_minimizer=ESPRESSO_CVL(),
+            ....:     sat_solver=SOLVER.CRYPTOMINISAT,
+            ....:     logic_minimizer=SOLVER.ESPRESSO,
             ....:     solve_range=(4, 8),
             ....:     path=Path(tmpdir))
             ....:   with suppress_output():
@@ -213,12 +220,11 @@ class SIMON_Variants_CVL:
 
         """
 
-        if name is None:
-            name = "simon"
-
         n = int(block_size // 2)
-        if rks == []:
-            rks = [0 for _ in range(R+1)]
+        if params is None:
+            params = [8, 1, 2]
+        if not rks:
+            rks = [0 for _ in range(R + 1)]
 
         # SIMON is an AndRX cipher, since its non-linear component
         # is logical AND.
@@ -241,42 +247,28 @@ class SIMON_Variants_CVL:
         # ------------------------------------------------ #
         # insert RotateLayer_CVL + AND_CVL components
         if not use_rotand:
-            node_rot_2 = simon_round.add_subcipher(
-                rot_2, [(simon_round.IN, (0, 0))]
-            )
-            node_rot_1 = simon_round.add_subcipher(
-                rot_1, [(simon_round.IN, (0, 0))]
-            )
+            node_rot_2 = simon_round.add_subcipher(rot_2, [(simon_round.IN, (0, 0))])
+            node_rot_1 = simon_round.add_subcipher(rot_1, [(simon_round.IN, (0, 0))])
             node_and = simon_round.add_subcipher(
                 and1, [(node_rot_2, (0, 0)), (node_rot_1, (0, 1))]
             )
             node_xor1 = simon_round.add_subcipher(
-                xor,  [(node_and, (0, 0)), (simon_round.IN, (1, 1))]
+                xor, [(node_and, (0, 0)), (simon_round.IN, (1, 1))]
             )
         # insert ROT_AND_CVL component
         else:
-            node_rot_2 = simon_round.add_subcipher(
-                rot_2, [(simon_round.IN, (0, 0))]
-            )
-            node_rot_and = simon_round.add_subcipher(
-                ra1,  [(node_rot_2, (0, 0))]
-            )
+            node_rot_2 = simon_round.add_subcipher(rot_2, [(simon_round.IN, (0, 0))])
+            node_rot_and = simon_round.add_subcipher(ra1, [(node_rot_2, (0, 0))])
             node_xor1 = simon_round.add_subcipher(
-                xor,  [(node_rot_and, (0, 0)), (simon_round.IN, (1, 1))]
+                xor, [(node_rot_and, (0, 0)), (simon_round.IN, (1, 1))]
             )
 
-        node_rot_3 = simon_round.add_subcipher(
-            rot_3, [(simon_round.IN, (0, 0))]
-        )
+        node_rot_3 = simon_round.add_subcipher(rot_3, [(simon_round.IN, (0, 0))])
         node_xor2 = simon_round.add_subcipher(
-            xor,  [(node_xor1, (0, 0)), (node_rot_3, (0, 1))]
+            xor, [(node_xor1, (0, 0)), (node_rot_3, (0, 1))]
         )
-        node_keyxor = simon_round.add_subcipher(
-            key_add, [(node_xor2, (0, 0))]
-        )
-        simon_round.add_output(
-            [(node_keyxor, (0, 0)), (simon_round.IN, (0, 1))]
-        )
+        node_keyxor = simon_round.add_subcipher(key_add, [(node_xor2, (0, 0))])
+        simon_round.add_output([(node_keyxor, (0, 0)), (simon_round.IN, (0, 1))])
         # ------------------------------------------------ #
 
         # Adding SIMON rounds into the cipher
@@ -293,9 +285,14 @@ class SIMON_Variants_CVL:
         simon_cipher.add_output([(node, (0, 0)), (node, (1, 1))])
         # ------------------------------------------------ #
 
+        simon_cipher._rk_components = [
+            simon_cipher.nodes[r + 1].nodes[node_keyxor] for r in range(R)
+        ]
+        simon_cipher.key_schedule = None
+
         self.simon_cipher = simon_cipher
 
     def __new__(cls, *args, **kwargs):
-        instance = super(SIMON_Variants_CVL, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.simon_cipher

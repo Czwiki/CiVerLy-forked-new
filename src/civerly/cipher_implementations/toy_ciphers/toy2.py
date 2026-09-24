@@ -1,7 +1,8 @@
 from sage.matrix.constructor import Matrix as matrix
 from sage.rings.finite_rings.finite_field_constructor import GF
-from civerly.sboxcipher import SBoxCipher
+
 from civerly.component import LinearLayer_CVL, PermuteLayer_CVL
+from civerly.sboxcipher import SBoxCipher
 
 
 # linear cipher using rounds with intentionally missing
@@ -25,20 +26,13 @@ class Toy2:
             ....:       optimization=OPTIMIZATION.SAT,
             ....:       granularity=GRANULARITY.BITWISE,
             ....:       linear_layer_modeling=LINEAR_LAYER_MODELING.EXCLUDE_ODD,
-            ....:       sat_solver=CRYPTOMINISAT_CVL(),
+            ....:       sat_solver=SOLVER.CRYPTOMINISAT,
             ....:       path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             ....:   trail = str(cipher.get_trail(model_options))
             ....:   assert "Unnamed Component" not in trail
             ....:   cipher.generate_report(model_options)
             1120 variables and 6177 clauses were written to '...'
-            [  0 ,100] (trying w =  50) : SAT
-            [  0 , 50] (trying w =  25) : SAT
-            [  0 , 25] (trying w =  12) : SAT
-            [  0 , 12] (trying w =   6) : SAT
-            [  0 ,  6] (trying w =   3) : SAT
-            [  0 ,  3] (trying w =   1) : SAT
-            [  0 ,  1] (trying w =   0) : SAT
             0
             Output file in: ...
             sage: with tempfile.TemporaryDirectory() as tmpdir:
@@ -48,18 +42,11 @@ class Toy2:
             ....:       optimization=OPTIMIZATION.SAT,
             ....:       granularity=GRANULARITY.BITWISE,
             ....:       linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
-            ....:       sat_solver=CRYPTOMINISAT_CVL(),
+            ....:       sat_solver=SOLVER.CRYPTOMINISAT,
             ....:       path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             ....:   cipher.generate_report(model_options)
             1408 variables and 3617 clauses were written to '...'
-            [  0 ,100] (trying w =  50) : SAT
-            [  0 , 50] (trying w =  25) : SAT
-            [  0 , 25] (trying w =  12) : SAT
-            [  0 , 12] (trying w =   6) : SAT
-            [  0 ,  6] (trying w =   3) : SAT
-            [  0 ,  3] (trying w =   1) : SAT
-            [  0 ,  1] (trying w =   0) : SAT
             0
             Output file in: ...
 
@@ -76,7 +63,7 @@ class Toy2:
             ....:       optimization=OPTIMIZATION.MILP,
             ....:       granularity=GRANULARITY.BITWISE,
             ....:       linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
-            ....:       milp_solver=SCIP_CVL(),
+            ....:       milp_solver=SOLVER.SCIP,
             ....:       path=Path(tmpdir))
             ....:   cipher.analyse(model_options=model_options)
             ....:   cipher.generate_report(model_options)
@@ -97,7 +84,7 @@ class Toy2:
             [0, 1, 1, 1, 1, 0, 1, 0],
             [0, 0, 0, 1, 0, 0, 1, 0],
             [1, 0, 0, 1, 1, 0, 1, 0],
-            [0, 1, 0, 1, 0, 1, 0, 1]
+            [0, 1, 0, 1, 0, 1, 0, 1],
         ]
         mat = matrix(GF(2), 8, arr)
         L1 = LinearLayer_CVL(mat, name="L1(8)")
@@ -108,21 +95,29 @@ class Toy2:
 
         node_in = round.add_subcipher(P1, [(round.IN, (i, i)) for i in range(16)])
         node1 = round.add_subcipher(L1, [(node_in, (i, i)) for i in range(8)])
-        node2 = round.add_subcipher(L2, [(node_in, (i+8, i)) for i in range(8)])
-        node_mid = round.add_subcipher(P2, [(node1, (i, i+8)) for i in range(8)] + [(node2, (i, i)) for i in range(8)])
+        node2 = round.add_subcipher(L2, [(node_in, (i + 8, i)) for i in range(8)])
+        node_mid = round.add_subcipher(
+            P2,
+            [(node1, (i, i + 8)) for i in range(8)]
+            + [(node2, (i, i)) for i in range(8)],
+        )
         node3 = round.add_subcipher(L1, [(node_mid, (i, i)) for i in range(8)])
-        node4 = round.add_subcipher(L2, [(node_mid, (i+8, i)) for i in range(8)])
-        node_out = round.add_subcipher(P3, [(node3, (i, i)) for i in range(8)] + [(node4, (i, i+8)) for i in range(8)])
+        node4 = round.add_subcipher(L2, [(node_mid, (i + 8, i)) for i in range(8)])
+        node_out = round.add_subcipher(
+            P3,
+            [(node3, (i, i)) for i in range(8)]
+            + [(node4, (i, i + 8)) for i in range(8)],
+        )
         round.add_output([(node_out, (i, i)) for i in range(16)])
 
         node = cipher.IN
-        for r in range(4):
+        for _r in range(4):
             node = cipher.add_subcipher(round, [(node, (i, i)) for i in range(16)])
         cipher.add_output([(node, (i, i)) for i in range(16)])
 
         self.cipher = cipher
 
     def __new__(cls, *args, **kwargs):
-        instance = super(Toy2, cls).__new__(cls)
+        instance = super().__new__(cls)
         instance.__init__(*args, **kwargs)
         return instance.cipher
