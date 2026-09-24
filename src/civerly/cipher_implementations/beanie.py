@@ -256,7 +256,7 @@ def _derive_round_keys(master_key, tweak, R):
 class BEANIE_CVL:
     def __init__(
         self,
-        R=5,
+        R=None,
         start=None,
         end=None,
         rks=None,
@@ -276,6 +276,8 @@ class BEANIE_CVL:
         INPUT:
 
             - ``R`` -- integer (default: ``5``); Number of encryption rounds.
+              Must not be given in U-shape mode, where the number of rounds
+              is determined by ``rl`` and ``rr``.
 
             - ``start`` -- integer (optional); First round of the slice to
               build (1-indexed, absolute with respect to an ``R``-round cipher).
@@ -364,7 +366,7 @@ class BEANIE_CVL:
             sage: vec_to_int(beanie_35(mid)) == vec_to_int(beanie_full(pt))
             True
 
-        U-shape attack with one round on each branch::
+        U-shape form with one round on each branch::
 
             sage: from civerly.cipher_implementations.beanie import BEANIE_CVL
             sage: from civerly.util import int_to_vec, vec_to_int
@@ -375,7 +377,7 @@ class BEANIE_CVL:
             sage: hex(vec_to_int(beanie_u(int_to_vec(0x12345678, 32))))
             '0xcfe08ba5'
 
-        U-shape attack with two left and one right round::
+        U-shape form with two left and one right round::
 
             sage: from civerly.cipher_implementations.beanie import BEANIE_CVL
             sage: from civerly.util import int_to_vec, vec_to_int
@@ -386,7 +388,7 @@ class BEANIE_CVL:
             sage: hex(vec_to_int(beanie_u(int_to_vec(0x12345678, 32))))
             '0x458728b0'
 
-        U-shape attack with two rounds on each branch::
+        U-shape form with two rounds on each branch::
 
             sage: from civerly.cipher_implementations.beanie import BEANIE_CVL
             sage: from civerly.util import int_to_vec, vec_to_int
@@ -436,6 +438,14 @@ class BEANIE_CVL:
             sage: full(int_to_vec(0x12345678, 32)) == slce(int_to_vec(0x12345678, 32))
             True
 
+        ``R`` cannot be combined with the U-shape parameters::
+
+            sage: from civerly.cipher_implementations.beanie import BEANIE_CVL
+            sage: BEANIE_CVL(R=5, rl=2, rr=2)
+            Traceback (most recent call last):
+            ...
+            ValueError: R must not be given in U-shape mode, use rl and rr instead
+
         Model the cipher with MILP (differential, wordwise, branch number)::
 
             sage: from civerly.cipher_implementations.beanie import BEANIE_CVL
@@ -451,26 +461,34 @@ class BEANIE_CVL:
             ....:     milp_solver=SCIP_CVL(),
             ....:     path=Path(tmpdir))
             ....:   beanie.analyse(model_options)
-            2832 variables and 2889 constraints were written to '...'
-            15
+            532 variables and 549 constraints were written to '...'
+            8
 
-        Model the cipher with MILP (differential, bitwise)::
+        Three rounds of BEANIE have at least 8 active S-boxes. As the maximal
+        differential probability of the S-box is :math:`2^{-2}`, this implies
+        that the best 3-round differential trail has probability at most
+        :math:`2^{-16}`, which is tight (see the SAT example below).
+
+        Model the cipher with MILP (differential, bitwise). Solving the
+        bitwise MILP is expensive, hence only two rounds are modeled here::
 
             sage: from civerly.cipher_implementations.beanie import BEANIE_CVL
             sage: from civerly.model_options import *
             sage: import tempfile
-            sage: beanie = BEANIE_CVL(R=3)
-            sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - scip
+            sage: beanie = BEANIE_CVL(R=2)
+            sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - scip  # long time
             ....:   model_options = MODEL_OPTIONS(
             ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
             ....:     optimization=OPTIMIZATION.MILP,
             ....:     granularity=GRANULARITY.BITWISE,
+            ....:     linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
             ....:     sbox_modeling=SBOX_MODELING.CONVEX_HULL,
             ....:     milp_solver=SCIP_CVL(),
             ....:     path=Path(tmpdir))
             ....:   beanie.analyse(model_options)
-            6864 variables and 7841 constraints were written to '...'
-            15
+            Using existing file ..., make sure it is up to date!
+            1616 variables and 1713 constraints were written to '...'
+            10
 
         Model the cipher with SAT (differential, bitwise)::
 
@@ -491,13 +509,21 @@ class BEANIE_CVL:
             ....:   beanie.analyse(model_options)
             ....:   trail = str(beanie.get_trail(model_options))
             ....:   assert "Unnamed Component" not in trail
-            6864 variables and 15361 clauses were written to '...'
-            '[  0 ,100] (trying w =  50) : SAT\n[  0 , 50] (trying w =  25) : SAT\n[  0 , 25] (trying w =  12) : SAT\n[  0 , 12] (trying w =   6) : UNSAT\n[  7 , 12] (trying w =   9) : SAT\n[  doctest output truncated (1 line)\n            9
+            Using existing file ..., make sure it is up to date!
+            2184 variables and 8457 clauses were written to '...'
+            16
         """
         if name is None:
             name = "BEANIE"
 
         u_shape_mode = (rl is not None) or (rr is not None)
+
+        if u_shape_mode and R is not None:
+            raise ValueError(
+                "R must not be given in U-shape mode, use rl and rr instead"
+            )
+        if R is None:
+            R = 5
 
         # -------------------------------------------------------------------
         # Validate the round-range arguments.
