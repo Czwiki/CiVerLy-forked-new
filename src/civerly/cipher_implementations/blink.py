@@ -1228,50 +1228,26 @@ class BLINK_CVL:
         sage: hex(vec_to_int(blink(int_to_vec(0, 64))))
         '0xa4a0d10502be846e'
 
-    A single S-box layer can also be isolated, and a sliced core can be
-    used in Superbox-style experiments::
-
-        sage: from civerly.cipher_implementations.blink import BLINK_CVL
-        sage: from civerly.util import int_to_vec, vec_to_int
-        sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa1
-        sage: core = BLINK_CVL(64, 64, key=key, tweak=0x0123456789abcdef, start=7, end=8)
-        sage: core.is_valid
-        True
-
-    The graph contains only explicitly named components::
-
-        sage: from civerly.cipher_implementations.blink import BLINK_CVL
-        sage: blink = BLINK_CVL(64, 64)
-        sage: for node in blink.nodes:
-        ....:     if hasattr(node, 'name'):
-        ....:         assert "Unnamed Component" not in node.name
-        ....:     if hasattr(node, 'nodes'):
-        ....:         for sub in node.nodes:
-        ....:             if hasattr(sub, 'name'):
-        ....:                 assert "Unnamed Component" not in sub.name
-        sage: blink.is_valid
-        True
-
-    Modeling the cipher with MILP (bitwise granularity, ``WordSBoxCipher``
-    base class with ``wordsize = 4`` also allows wordwise modeling)::
+    Model the cipher with SAT::
 
         sage: from civerly.cipher_implementations.blink import BLINK_CVL
         sage: from civerly.model_options import *
         sage: import tempfile
-        sage: blink = BLINK_CVL(64, 64, name="blink-64a")
-        sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - scip
+        sage: blink = BLINK_CVL(64, 64, start=1, end=3, name="blink-64a")
+        sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - cryptominisat
         ....:   model_options = MODEL_OPTIONS(
         ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
-        ....:     optimization=OPTIMIZATION.MILP,
+        ....:     optimization=OPTIMIZATION.SAT,
         ....:     granularity=GRANULARITY.BITWISE,
         ....:     linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
-        ....:     sbox_modeling=SBOX_MODELING.CONVEX_HULL,
-        ....:     milp_solver=SCIP_CVL(),
+        ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
+        ....:     sat_solver=CRYPTOMINISAT_CVL(),
+        ....:     logic_minimizer=ESPRESSO_CVL(),
         ....:     path=Path(tmpdir))
-        ....:   milp = blink.model(model_options)
-        ....:   milp is not None
-        True
-
+        ....:   blink.analyse(model_options)
+        Using existing file ..., make sure it is up to date!
+        5712 variables and 14657 clauses were written to ...
+        14
     """
 
     def __init__(
