@@ -168,7 +168,9 @@ def _build_round_cipher(variant, round_index, ka, kb, ir_bit):
     fb_bits = params["fb"]
     steps = params["steps"]
 
-    round_cipher = SBoxCipher(l1_len + l2_len, l1_len + l2_len, name=f"KATAN{variant}-r{round_index}")
+    round_cipher = SBoxCipher(
+        l1_len + l2_len, l1_len + l2_len, name=f"KATAN{variant}-r{round_index}"
+    )
     node = round_cipher.IN
     for step_idx in range(steps):
         step = _build_step_cipher(
@@ -216,29 +218,101 @@ def reference_katan_encrypt(variant, plaintext_int, key_int, rounds):
 
     for r in range(rounds):
         if steps == 1:
-            fa = L1[fa_pos[0]] ^ L1[fa_pos[1]] ^ (L1[fa_pos[2]] & L1[fa_pos[3]]) ^ ((L1[fa_pos[4]] & ir[r])) ^ k[2 * r]
-            fb = L2[fb_pos[0]] ^ L2[fb_pos[1]] ^ (L2[fb_pos[2]] & L2[fb_pos[3]]) ^ ((L2[fb_pos[4]] & L2[fb_pos[5]])) ^ k[2 * r + 1]
+            fa = (
+                L1[fa_pos[0]]
+                ^ L1[fa_pos[1]]
+                ^ (L1[fa_pos[2]] & L1[fa_pos[3]])
+                ^ (L1[fa_pos[4]] & ir[r])
+                ^ k[2 * r]
+            )
+            fb = (
+                L2[fb_pos[0]]
+                ^ L2[fb_pos[1]]
+                ^ (L2[fb_pos[2]] & L2[fb_pos[3]])
+                ^ (L2[fb_pos[4]] & L2[fb_pos[5]])
+                ^ k[2 * r + 1]
+            )
 
             # shift left (towards higher index), dropping MSB (last element)
             L1 = [fb] + L1[:-1]
             L2 = [fa] + L2[:-1]
 
         elif steps == 2:
-            fa_1 = L1[fa_pos[0]] ^ L1[fa_pos[1]] ^ (L1[fa_pos[2]] & L1[fa_pos[3]]) ^ ((L1[fa_pos[4]] & ir[r])) ^ k[2 * r]
-            fa_0 = L1[fa_pos[0] - 1] ^ L1[fa_pos[1] - 1] ^ (L1[fa_pos[2] - 1] & L1[fa_pos[3] - 1]) ^ ((L1[fa_pos[4] - 1] & ir[r])) ^ k[2 * r]
-            fb_1 = L2[fb_pos[0]] ^ L2[fb_pos[1]] ^ (L2[fb_pos[2]] & L2[fb_pos[3]]) ^ ((L2[fb_pos[4]] & L2[fb_pos[5]])) ^ k[2 * r + 1]
-            fb_0 = L2[fb_pos[0] - 1] ^ L2[fb_pos[1] - 1] ^ (L2[fb_pos[2] - 1] & L2[fb_pos[3] - 1]) ^ ((L2[fb_pos[4] - 1] & L2[fb_pos[5] - 1])) ^ k[2 * r + 1]
+            fa_1 = (
+                L1[fa_pos[0]]
+                ^ L1[fa_pos[1]]
+                ^ (L1[fa_pos[2]] & L1[fa_pos[3]])
+                ^ (L1[fa_pos[4]] & ir[r])
+                ^ k[2 * r]
+            )
+            fa_0 = (
+                L1[fa_pos[0] - 1]
+                ^ L1[fa_pos[1] - 1]
+                ^ (L1[fa_pos[2] - 1] & L1[fa_pos[3] - 1])
+                ^ (L1[fa_pos[4] - 1] & ir[r])
+                ^ k[2 * r]
+            )
+            fb_1 = (
+                L2[fb_pos[0]]
+                ^ L2[fb_pos[1]]
+                ^ (L2[fb_pos[2]] & L2[fb_pos[3]])
+                ^ (L2[fb_pos[4]] & L2[fb_pos[5]])
+                ^ k[2 * r + 1]
+            )
+            fb_0 = (
+                L2[fb_pos[0] - 1]
+                ^ L2[fb_pos[1] - 1]
+                ^ (L2[fb_pos[2] - 1] & L2[fb_pos[3] - 1])
+                ^ (L2[fb_pos[4] - 1] & L2[fb_pos[5] - 1])
+                ^ k[2 * r + 1]
+            )
 
             L1 = [fb_0, fb_1] + L1[:-2]
             L2 = [fa_0, fa_1] + L2[:-2]
 
         elif steps == 3:
-            fa_2 = L1[fa_pos[0]] ^ L1[fa_pos[1]] ^ (L1[fa_pos[2]] & L1[fa_pos[3]]) ^ ((L1[fa_pos[4]] & ir[r])) ^ k[2 * r]
-            fa_1 = L1[fa_pos[0] - 1] ^ L1[fa_pos[1] - 1] ^ (L1[fa_pos[2] - 1] & L1[fa_pos[3] - 1]) ^ ((L1[fa_pos[4] - 1] & ir[r])) ^ k[2 * r]
-            fa_0 = L1[fa_pos[0] - 2] ^ L1[fa_pos[1] - 2] ^ (L1[fa_pos[2] - 2] & L1[fa_pos[3] - 2]) ^ ((L1[fa_pos[4] - 2] & ir[r])) ^ k[2 * r]
-            fb_2 = L2[fb_pos[0]] ^ L2[fb_pos[1]] ^ (L2[fb_pos[2]] & L2[fb_pos[3]]) ^ ((L2[fb_pos[4]] & L2[fb_pos[5]])) ^ k[2 * r + 1]
-            fb_1 = L2[fb_pos[0] - 1] ^ L2[fb_pos[1] - 1] ^ (L2[fb_pos[2] - 1] & L2[fb_pos[3] - 1]) ^ ((L2[fb_pos[4] - 1] & L2[fb_pos[5] - 1])) ^ k[2 * r + 1]
-            fb_0 = L2[fb_pos[0] - 2] ^ L2[fb_pos[1] - 2] ^ (L2[fb_pos[2] - 2] & L2[fb_pos[3] - 2]) ^ ((L2[fb_pos[4] - 2] & L2[fb_pos[5] - 2])) ^ k[2 * r + 1]
+            fa_2 = (
+                L1[fa_pos[0]]
+                ^ L1[fa_pos[1]]
+                ^ (L1[fa_pos[2]] & L1[fa_pos[3]])
+                ^ (L1[fa_pos[4]] & ir[r])
+                ^ k[2 * r]
+            )
+            fa_1 = (
+                L1[fa_pos[0] - 1]
+                ^ L1[fa_pos[1] - 1]
+                ^ (L1[fa_pos[2] - 1] & L1[fa_pos[3] - 1])
+                ^ (L1[fa_pos[4] - 1] & ir[r])
+                ^ k[2 * r]
+            )
+            fa_0 = (
+                L1[fa_pos[0] - 2]
+                ^ L1[fa_pos[1] - 2]
+                ^ (L1[fa_pos[2] - 2] & L1[fa_pos[3] - 2])
+                ^ (L1[fa_pos[4] - 2] & ir[r])
+                ^ k[2 * r]
+            )
+            fb_2 = (
+                L2[fb_pos[0]]
+                ^ L2[fb_pos[1]]
+                ^ (L2[fb_pos[2]] & L2[fb_pos[3]])
+                ^ (L2[fb_pos[4]] & L2[fb_pos[5]])
+                ^ k[2 * r + 1]
+            )
+            fb_1 = (
+                L2[fb_pos[0] - 1]
+                ^ L2[fb_pos[1] - 1]
+                ^ (L2[fb_pos[2] - 1] & L2[fb_pos[3] - 1])
+                ^ (L2[fb_pos[4] - 1] & L2[fb_pos[5] - 1])
+                ^ k[2 * r + 1]
+            )
+            fb_0 = (
+                L2[fb_pos[0] - 2]
+                ^ L2[fb_pos[1] - 2]
+                ^ (L2[fb_pos[2] - 2] & L2[fb_pos[3] - 2])
+                ^ (L2[fb_pos[4] - 2] & L2[fb_pos[5] - 2])
+                ^ k[2 * r + 1]
+            )
 
             L1 = [fb_0, fb_1, fb_2] + L1[:-3]
             L2 = [fa_0, fa_1, fa_2] + L2[:-3]

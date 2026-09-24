@@ -129,9 +129,7 @@ def _aradi_key_schedule(master_key):
     key_state = []
     for i, word in enumerate(master_key):
         if not (0 <= word <= _MASK32):
-            raise ValueError(
-                f"Master key word {i} is out of 32-bit range: {word}"
-            )
+            raise ValueError(f"Master key word {i} is out of 32-bit range: {word}")
         key_state.append(int(word) & _MASK32)
 
     # Generate the successive 8-word register states.
@@ -378,9 +376,7 @@ class ARADI_CVL:
             # standard 16 rounds.
             full_rounds = R if R is not None else 16
             if full_rounds <= round_end:
-                raise ValueError(
-                    "R must be a positive integer greater than round_end."
-                )
+                raise ValueError("R must be a positive integer greater than round_end.")
         else:
             if R is None:
                 R = 16
@@ -403,9 +399,7 @@ class ARADI_CVL:
                     "or a master key via `key`, not both."
                 )
             if full_rounds > 16:
-                raise ValueError(
-                    "When `key` is provided, `R` must not exceed 16."
-                )
+                raise ValueError("When `key` is provided, `R` must not exceed 16.")
             full_rks = _aradi_key_schedule(key)
             needed = expected_rks_count
             if round_start + needed > len(full_rks):
@@ -413,7 +407,7 @@ class ARADI_CVL:
                     "Insufficient round keys derived from the master key "
                     f"for the requested slice ({round_start}..{round_end})."
                 )
-            rks = full_rks[round_start:round_start + needed]
+            rks = full_rks[round_start : round_start + needed]
 
         if len(rks) != expected_rks_count:
             raise ValueError(
@@ -428,10 +422,16 @@ class ARADI_CVL:
         for bit_index in range(32):
             node = sbox_layer.add_subcipher(
                 sbox,
-                [(sbox_layer.IN, (bit_index + 32 * word_index, word_index)) for word_index in range(4)]
+                [
+                    (sbox_layer.IN, (bit_index + 32 * word_index, word_index))
+                    for word_index in range(4)
+                ],
             )
             sbox_layer.add_output(
-                [(node, (word_index, bit_index + 32 * word_index)) for word_index in range(4)]
+                [
+                    (node, (word_index, bit_index + 32 * word_index))
+                    for word_index in range(4)
+                ]
             )
 
         linear_layers = []
@@ -446,17 +446,20 @@ class ARADI_CVL:
                 b_values[round_index],
                 c_values[round_index],
             )
-            word_component = LinearLayer_CVL(
-                word_matrix,
-                name=f"L{round_index}"
-            )
+            word_component = LinearLayer_CVL(word_matrix, name=f"L{round_index}")
             for word_index in range(4):
                 node = linear_layer.add_subcipher(
                     word_component,
-                    [(linear_layer.IN, (32 * word_index + bit_index, bit_index)) for bit_index in range(32)]
+                    [
+                        (linear_layer.IN, (32 * word_index + bit_index, bit_index))
+                        for bit_index in range(32)
+                    ],
                 )
                 linear_layer.add_output(
-                    [(node, (bit_index, 32 * word_index + bit_index)) for bit_index in range(32)]
+                    [
+                        (node, (bit_index, 32 * word_index + bit_index))
+                        for bit_index in range(32)
+                    ]
                 )
             linear_layers.append(linear_layer)
 
@@ -469,20 +472,18 @@ class ARADI_CVL:
 
         for round_index in range(round_start, round_end + 1):
             round_cipher = SBoxCipher(128, 128, name=f"ARADI-round-{round_index}")
-            rk = RoundkeyXOR_CVL(
-                128, rks[round_index - round_start], name="RK"
-            )
+            rk = RoundkeyXOR_CVL(128, rks[round_index - round_start], name="RK")
             node_rk = round_cipher.add_subcipher(
                 rk,
-                [(round_cipher.IN, (bit_index, bit_index)) for bit_index in range(128)]
+                [(round_cipher.IN, (bit_index, bit_index)) for bit_index in range(128)],
             )
             node_sbox = round_cipher.add_subcipher(
                 sbox_layer,
-                [(node_rk, (bit_index, bit_index)) for bit_index in range(128)]
+                [(node_rk, (bit_index, bit_index)) for bit_index in range(128)],
             )
             node_linear = round_cipher.add_subcipher(
                 linear_layers[round_index % 4],
-                [(node_sbox, (bit_index, bit_index)) for bit_index in range(128)]
+                [(node_sbox, (bit_index, bit_index)) for bit_index in range(128)],
             )
             round_cipher.add_output(
                 [(node_linear, (bit_index, bit_index)) for bit_index in range(128)]
@@ -490,8 +491,13 @@ class ARADI_CVL:
 
             round_node = cipher.add_subcipher(
                 round_cipher,
-                [(cipher.IN if round_index == round_start else node,
-                  (bit_index, bit_index)) for bit_index in range(128)]
+                [
+                    (
+                        cipher.IN if round_index == round_start else node,
+                        (bit_index, bit_index),
+                    )
+                    for bit_index in range(128)
+                ],
             )
             round_outputs.append(round_node)
             node = round_node
@@ -499,13 +505,10 @@ class ARADI_CVL:
         if include_post_whiten:
             post_rk = RoundkeyXOR_CVL(128, rks[actual_rounds], name="PostRK")
             node = cipher.add_subcipher(
-                post_rk,
-                [(node, (bit_index, bit_index)) for bit_index in range(128)]
+                post_rk, [(node, (bit_index, bit_index)) for bit_index in range(128)]
             )
 
-        cipher.add_output(
-            [(node, (bit_index, bit_index)) for bit_index in range(128)]
-        )
+        cipher.add_output([(node, (bit_index, bit_index)) for bit_index in range(128)])
 
         self.cipher = cipher
         cipher.round_outputs = round_outputs

@@ -39,31 +39,285 @@ from civerly.util import int_to_vec, vec_to_int
 # ---------------------------------------------------------------------------
 
 HW2 = [
-    0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
-    1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
-    1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
-    0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
-    1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
-    0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
-    0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
-    1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
-    1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
-    0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
-    0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
-    1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
-    0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
-    1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
-    1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
-    0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
 ]
 
 # The 4-bit S-box S(x) of Blink (an involution).
-SBOX = SBox([
-    0x1, 0x0, 0x9, 0x3,
-    0x8, 0x5, 0xE, 0x7,
-    0x4, 0x2, 0xC, 0xB,
-    0xA, 0xF, 0x6, 0xD,
-])
+SBOX = SBox(
+    [
+        0x1,
+        0x0,
+        0x9,
+        0x3,
+        0x8,
+        0x5,
+        0xE,
+        0x7,
+        0x4,
+        0x2,
+        0xC,
+        0xB,
+        0xA,
+        0xF,
+        0x6,
+        0xD,
+    ]
+)
 
 # The Midori involutory diffusion matrix M.
 M_MATRIX = [
@@ -75,80 +329,597 @@ M_MATRIX = [
 
 # Variant-specific shuffle boxes (paper notation, see ``blink.md``).
 PBOX_64 = [
-    0, 5, 11, 10,
-    1, 6, 4, 13,
-    2, 12, 9, 15,
-    3, 7, 14, 8,
+    0,
+    5,
+    11,
+    10,
+    1,
+    6,
+    4,
+    13,
+    2,
+    12,
+    9,
+    15,
+    3,
+    7,
+    14,
+    8,
 ]
 
 PBOX_128 = [
-    5, 12, 4, 1, 17, 9, 10, 16,
-    28, 14, 21, 22, 11, 27, 8, 13,
-    2, 25, 18, 3, 30, 6, 19, 20,
-    0, 23, 24, 31, 7, 15, 29, 26,
+    5,
+    12,
+    4,
+    1,
+    17,
+    9,
+    10,
+    16,
+    28,
+    14,
+    21,
+    22,
+    11,
+    27,
+    8,
+    13,
+    2,
+    25,
+    18,
+    3,
+    30,
+    6,
+    19,
+    20,
+    0,
+    23,
+    24,
+    31,
+    7,
+    15,
+    29,
+    26,
 ]
 
 # Variant-specific round constants (rc and rc'). Indexed by [round][byte].
 ROUND_CONST_64 = [
-    [0x44, 0x73, 0x70, 0x03, 0x2e, 0x8a, 0x19, 0x13],
-    [0x89, 0x6c, 0x4e, 0xec, 0x98, 0xfa, 0x2e, 0x08],
-    [0x6c, 0x0c, 0xe9, 0x34, 0xcf, 0x66, 0x54, 0xbe],
-    [0x17, 0x09, 0x47, 0xb5, 0xb5, 0xd5, 0x84, 0x3f],
-    [0xac, 0xb5, 0xdf, 0x98, 0xa6, 0x0b, 0x31, 0xd1],
+    [0x44, 0x73, 0x70, 0x03, 0x2E, 0x8A, 0x19, 0x13],
+    [0x89, 0x6C, 0x4E, 0xEC, 0x98, 0xFA, 0x2E, 0x08],
+    [0x6C, 0x0C, 0xE9, 0x34, 0xCF, 0x66, 0x54, 0xBE],
+    [0x17, 0x09, 0x47, 0xB5, 0xB5, 0xD5, 0x84, 0x3F],
+    [0xAC, 0xB5, 0xDF, 0x98, 0xA6, 0x0B, 0x31, 0xD1],
 ]
 
 ROUND_CONST_PRIME_64 = [
-    [0x58, 0xb6, 0x8e, 0x72, 0x8f, 0x74, 0x95, 0x0d],
-    [0xb5, 0x59, 0x5a, 0xc2, 0x1d, 0xa4, 0x54, 0x7b],
-    [0xf0, 0x85, 0x60, 0x28, 0x23, 0xb0, 0xd1, 0xc5],
-    [0x0e, 0x18, 0x3a, 0x60, 0xb0, 0xdc, 0x79, 0x8e],
-    [0x27, 0x4b, 0x31, 0xbd, 0xc1, 0x77, 0x15, 0xd7],
+    [0x58, 0xB6, 0x8E, 0x72, 0x8F, 0x74, 0x95, 0x0D],
+    [0xB5, 0x59, 0x5A, 0xC2, 0x1D, 0xA4, 0x54, 0x7B],
+    [0xF0, 0x85, 0x60, 0x28, 0x23, 0xB0, 0xD1, 0xC5],
+    [0x0E, 0x18, 0x3A, 0x60, 0xB0, 0xDC, 0x79, 0x8E],
+    [0x27, 0x4B, 0x31, 0xBD, 0xC1, 0x77, 0x15, 0xD7],
 ]
 
 ROUND_CONST_128a = [
-    [0x44, 0x73, 0x70, 0x03, 0x2e, 0x8a, 0x19, 0x13, 0xd3, 0x08, 0xa3, 0x85, 0x88, 0x6a, 0x3f, 0x24],
-    [0x89, 0x6c, 0x4e, 0xec, 0x98, 0xfa, 0x2e, 0x08, 0xd0, 0x31, 0x9f, 0x29, 0x22, 0x38, 0x09, 0xa4],
-    [0x6c, 0x0c, 0xe9, 0x34, 0xcf, 0x66, 0x54, 0xbe, 0x77, 0x13, 0xd0, 0x38, 0xe6, 0x21, 0x28, 0x45],
-    [0x17, 0x09, 0x47, 0xb5, 0xb5, 0xd5, 0x84, 0x3f, 0xdd, 0x50, 0x7c, 0xc9, 0xb7, 0x29, 0xac, 0xc0],
-    [0xac, 0xb5, 0xdf, 0x98, 0xa6, 0x0b, 0x31, 0xd1, 0x1b, 0xfb, 0x79, 0x89, 0xd9, 0xd5, 0x16, 0x92],
-    [0x96, 0x7e, 0x26, 0x6a, 0xed, 0xaf, 0xe1, 0xb8, 0xb7, 0xdf, 0x1a, 0xd0, 0xdb, 0x72, 0xfd, 0x2f],
+    [
+        0x44,
+        0x73,
+        0x70,
+        0x03,
+        0x2E,
+        0x8A,
+        0x19,
+        0x13,
+        0xD3,
+        0x08,
+        0xA3,
+        0x85,
+        0x88,
+        0x6A,
+        0x3F,
+        0x24,
+    ],
+    [
+        0x89,
+        0x6C,
+        0x4E,
+        0xEC,
+        0x98,
+        0xFA,
+        0x2E,
+        0x08,
+        0xD0,
+        0x31,
+        0x9F,
+        0x29,
+        0x22,
+        0x38,
+        0x09,
+        0xA4,
+    ],
+    [
+        0x6C,
+        0x0C,
+        0xE9,
+        0x34,
+        0xCF,
+        0x66,
+        0x54,
+        0xBE,
+        0x77,
+        0x13,
+        0xD0,
+        0x38,
+        0xE6,
+        0x21,
+        0x28,
+        0x45,
+    ],
+    [
+        0x17,
+        0x09,
+        0x47,
+        0xB5,
+        0xB5,
+        0xD5,
+        0x84,
+        0x3F,
+        0xDD,
+        0x50,
+        0x7C,
+        0xC9,
+        0xB7,
+        0x29,
+        0xAC,
+        0xC0,
+    ],
+    [
+        0xAC,
+        0xB5,
+        0xDF,
+        0x98,
+        0xA6,
+        0x0B,
+        0x31,
+        0xD1,
+        0x1B,
+        0xFB,
+        0x79,
+        0x89,
+        0xD9,
+        0xD5,
+        0x16,
+        0x92,
+    ],
+    [
+        0x96,
+        0x7E,
+        0x26,
+        0x6A,
+        0xED,
+        0xAF,
+        0xE1,
+        0xB8,
+        0xB7,
+        0xDF,
+        0x1A,
+        0xD0,
+        0xDB,
+        0x72,
+        0xFD,
+        0x2F,
+    ],
 ]
 
 ROUND_CONST_PRIME_128a = [
-    [0x58, 0xb6, 0x8e, 0x72, 0x8f, 0x74, 0x95, 0x0d, 0x7e, 0x3d, 0x93, 0xf4, 0xa3, 0xfe, 0x58, 0xa4],
-    [0xb5, 0x59, 0x5a, 0xc2, 0x1d, 0xa4, 0x54, 0x7b, 0xee, 0x4a, 0x15, 0x82, 0x58, 0xcd, 0x8b, 0x71],
-    [0xf0, 0x85, 0x60, 0x28, 0x23, 0xb0, 0xd1, 0xc5, 0x13, 0x60, 0xf2, 0x2a, 0x39, 0xd5, 0x30, 0x9c],
-    [0x0e, 0x18, 0x3a, 0x60, 0xb0, 0xdc, 0x79, 0x8e, 0xef, 0x38, 0xdb, 0xb8, 0x18, 0x79, 0x41, 0xca],
-    [0x27, 0x4b, 0x31, 0xbd, 0xc1, 0x77, 0x15, 0xd7, 0x3e, 0x8a, 0x1e, 0xb0, 0x8b, 0x0e, 0x9e, 0x6c],
-    [0x94, 0xab, 0x55, 0xaa, 0xf3, 0x25, 0x55, 0xe6, 0x60, 0x5c, 0x60, 0x55, 0xda, 0x2f, 0xaf, 0x78],
+    [
+        0x58,
+        0xB6,
+        0x8E,
+        0x72,
+        0x8F,
+        0x74,
+        0x95,
+        0x0D,
+        0x7E,
+        0x3D,
+        0x93,
+        0xF4,
+        0xA3,
+        0xFE,
+        0x58,
+        0xA4,
+    ],
+    [
+        0xB5,
+        0x59,
+        0x5A,
+        0xC2,
+        0x1D,
+        0xA4,
+        0x54,
+        0x7B,
+        0xEE,
+        0x4A,
+        0x15,
+        0x82,
+        0x58,
+        0xCD,
+        0x8B,
+        0x71,
+    ],
+    [
+        0xF0,
+        0x85,
+        0x60,
+        0x28,
+        0x23,
+        0xB0,
+        0xD1,
+        0xC5,
+        0x13,
+        0x60,
+        0xF2,
+        0x2A,
+        0x39,
+        0xD5,
+        0x30,
+        0x9C,
+    ],
+    [
+        0x0E,
+        0x18,
+        0x3A,
+        0x60,
+        0xB0,
+        0xDC,
+        0x79,
+        0x8E,
+        0xEF,
+        0x38,
+        0xDB,
+        0xB8,
+        0x18,
+        0x79,
+        0x41,
+        0xCA,
+    ],
+    [
+        0x27,
+        0x4B,
+        0x31,
+        0xBD,
+        0xC1,
+        0x77,
+        0x15,
+        0xD7,
+        0x3E,
+        0x8A,
+        0x1E,
+        0xB0,
+        0x8B,
+        0x0E,
+        0x9E,
+        0x6C,
+    ],
+    [
+        0x94,
+        0xAB,
+        0x55,
+        0xAA,
+        0xF3,
+        0x25,
+        0x55,
+        0xE6,
+        0x60,
+        0x5C,
+        0x60,
+        0x55,
+        0xDA,
+        0x2F,
+        0xAF,
+        0x78,
+    ],
 ]
 
 ROUND_CONST_128A = [
-    [0x44, 0x73, 0x70, 0x03, 0x2e, 0x8a, 0x19, 0x13, 0xd3, 0x08, 0xa3, 0x85, 0x88, 0x6a, 0x3f, 0x24],
-    [0x89, 0x6c, 0x4e, 0xec, 0x98, 0xfa, 0x2e, 0x08, 0xd0, 0x31, 0x9f, 0x29, 0x22, 0x38, 0x09, 0xa4],
-    [0x6c, 0x0c, 0xe9, 0x34, 0xcf, 0x66, 0x54, 0xbe, 0x77, 0x13, 0xd0, 0x38, 0xe6, 0x21, 0x28, 0x45],
-    [0x17, 0x09, 0x47, 0xb5, 0xb5, 0xd5, 0x84, 0x3f, 0xdd, 0x50, 0x7c, 0xc9, 0xb7, 0x29, 0xac, 0xc0],
-    [0xac, 0xb5, 0xdf, 0x98, 0xa6, 0x0b, 0x31, 0xd1, 0x1b, 0xfb, 0x79, 0x89, 0xd9, 0xd5, 0x16, 0x92],
-    [0x96, 0x7e, 0x26, 0x6a, 0xed, 0xaf, 0xe1, 0xb8, 0xb7, 0xdf, 0x1a, 0xd0, 0xdb, 0x72, 0xfd, 0x2f],
-    [0xf7, 0x6c, 0x91, 0xb3, 0x47, 0x99, 0xa1, 0x24, 0x99, 0x7f, 0x2c, 0xf1, 0x45, 0x90, 0x7c, 0xba],
-    [0x69, 0x4e, 0x57, 0x71, 0xd8, 0x20, 0x69, 0x63, 0x16, 0xfc, 0x8e, 0x85, 0xe2, 0xf2, 0x01, 0x08],
+    [
+        0x44,
+        0x73,
+        0x70,
+        0x03,
+        0x2E,
+        0x8A,
+        0x19,
+        0x13,
+        0xD3,
+        0x08,
+        0xA3,
+        0x85,
+        0x88,
+        0x6A,
+        0x3F,
+        0x24,
+    ],
+    [
+        0x89,
+        0x6C,
+        0x4E,
+        0xEC,
+        0x98,
+        0xFA,
+        0x2E,
+        0x08,
+        0xD0,
+        0x31,
+        0x9F,
+        0x29,
+        0x22,
+        0x38,
+        0x09,
+        0xA4,
+    ],
+    [
+        0x6C,
+        0x0C,
+        0xE9,
+        0x34,
+        0xCF,
+        0x66,
+        0x54,
+        0xBE,
+        0x77,
+        0x13,
+        0xD0,
+        0x38,
+        0xE6,
+        0x21,
+        0x28,
+        0x45,
+    ],
+    [
+        0x17,
+        0x09,
+        0x47,
+        0xB5,
+        0xB5,
+        0xD5,
+        0x84,
+        0x3F,
+        0xDD,
+        0x50,
+        0x7C,
+        0xC9,
+        0xB7,
+        0x29,
+        0xAC,
+        0xC0,
+    ],
+    [
+        0xAC,
+        0xB5,
+        0xDF,
+        0x98,
+        0xA6,
+        0x0B,
+        0x31,
+        0xD1,
+        0x1B,
+        0xFB,
+        0x79,
+        0x89,
+        0xD9,
+        0xD5,
+        0x16,
+        0x92,
+    ],
+    [
+        0x96,
+        0x7E,
+        0x26,
+        0x6A,
+        0xED,
+        0xAF,
+        0xE1,
+        0xB8,
+        0xB7,
+        0xDF,
+        0x1A,
+        0xD0,
+        0xDB,
+        0x72,
+        0xFD,
+        0x2F,
+    ],
+    [
+        0xF7,
+        0x6C,
+        0x91,
+        0xB3,
+        0x47,
+        0x99,
+        0xA1,
+        0x24,
+        0x99,
+        0x7F,
+        0x2C,
+        0xF1,
+        0x45,
+        0x90,
+        0x7C,
+        0xBA,
+    ],
+    [
+        0x69,
+        0x4E,
+        0x57,
+        0x71,
+        0xD8,
+        0x20,
+        0x69,
+        0x63,
+        0x16,
+        0xFC,
+        0x8E,
+        0x85,
+        0xE2,
+        0xF2,
+        0x01,
+        0x08,
+    ],
 ]
 
 ROUND_CONST_PRIME_128A = [
-    [0x58, 0xb6, 0x8e, 0x72, 0x8f, 0x74, 0x95, 0x0d, 0x7e, 0x3d, 0x93, 0xf4, 0xa3, 0xfe, 0x58, 0xa4],
-    [0xb5, 0x59, 0x5a, 0xc2, 0x1d, 0xa4, 0x54, 0x7b, 0xee, 0x4a, 0x15, 0x82, 0x58, 0xcd, 0x8b, 0x71],
-    [0xf0, 0x85, 0x60, 0x28, 0x23, 0xb0, 0xd1, 0xc5, 0x13, 0x60, 0xf2, 0x2a, 0x39, 0xd5, 0x30, 0x9c],
-    [0x0e, 0x18, 0x3a, 0x60, 0xb0, 0xdc, 0x79, 0x8e, 0xef, 0x38, 0xdb, 0xb8, 0x18, 0x79, 0x41, 0xca],
-    [0x27, 0x4b, 0x31, 0xbd, 0xc1, 0x77, 0x15, 0xd7, 0x3e, 0x8a, 0x1e, 0xb0, 0x8b, 0x0e, 0x9e, 0x6c],
-    [0x94, 0xab, 0x55, 0xaa, 0xf3, 0x25, 0x55, 0xe6, 0x60, 0x5c, 0x60, 0x55, 0xda, 0x2f, 0xaf, 0x78],
-    [0xb6, 0x10, 0xab, 0x2a, 0x6a, 0x39, 0xca, 0x55, 0x40, 0x14, 0xe8, 0x63, 0x62, 0x98, 0x48, 0x57],
-    [0x93, 0xe9, 0x72, 0x7c, 0xaf, 0x86, 0x54, 0xa1, 0xce, 0xe8, 0x41, 0x11, 0x34, 0x5c, 0xcc, 0xb4],
+    [
+        0x58,
+        0xB6,
+        0x8E,
+        0x72,
+        0x8F,
+        0x74,
+        0x95,
+        0x0D,
+        0x7E,
+        0x3D,
+        0x93,
+        0xF4,
+        0xA3,
+        0xFE,
+        0x58,
+        0xA4,
+    ],
+    [
+        0xB5,
+        0x59,
+        0x5A,
+        0xC2,
+        0x1D,
+        0xA4,
+        0x54,
+        0x7B,
+        0xEE,
+        0x4A,
+        0x15,
+        0x82,
+        0x58,
+        0xCD,
+        0x8B,
+        0x71,
+    ],
+    [
+        0xF0,
+        0x85,
+        0x60,
+        0x28,
+        0x23,
+        0xB0,
+        0xD1,
+        0xC5,
+        0x13,
+        0x60,
+        0xF2,
+        0x2A,
+        0x39,
+        0xD5,
+        0x30,
+        0x9C,
+    ],
+    [
+        0x0E,
+        0x18,
+        0x3A,
+        0x60,
+        0xB0,
+        0xDC,
+        0x79,
+        0x8E,
+        0xEF,
+        0x38,
+        0xDB,
+        0xB8,
+        0x18,
+        0x79,
+        0x41,
+        0xCA,
+    ],
+    [
+        0x27,
+        0x4B,
+        0x31,
+        0xBD,
+        0xC1,
+        0x77,
+        0x15,
+        0xD7,
+        0x3E,
+        0x8A,
+        0x1E,
+        0xB0,
+        0x8B,
+        0x0E,
+        0x9E,
+        0x6C,
+    ],
+    [
+        0x94,
+        0xAB,
+        0x55,
+        0xAA,
+        0xF3,
+        0x25,
+        0x55,
+        0xE6,
+        0x60,
+        0x5C,
+        0x60,
+        0x55,
+        0xDA,
+        0x2F,
+        0xAF,
+        0x78,
+    ],
+    [
+        0xB6,
+        0x10,
+        0xAB,
+        0x2A,
+        0x6A,
+        0x39,
+        0xCA,
+        0x55,
+        0x40,
+        0x14,
+        0xE8,
+        0x63,
+        0x62,
+        0x98,
+        0x48,
+        0x57,
+    ],
+    [
+        0x93,
+        0xE9,
+        0x72,
+        0x7C,
+        0xAF,
+        0x86,
+        0x54,
+        0xA1,
+        0xCE,
+        0xE8,
+        0x41,
+        0x11,
+        0x34,
+        0x5C,
+        0xCC,
+        0xB4,
+    ],
 ]
 
 
 # ---------------------------------------------------------------------------
 # Variant configuration
 # ---------------------------------------------------------------------------
+
 
 def _variant_config(block_bits, tweak_bits, key_bytes):
     """Return (state_bytes, tweak_bytes, ra, rb, pbox, rc, rc_prime)."""
@@ -166,7 +937,7 @@ def _variant_config(block_bits, tweak_bits, key_bytes):
         else:
             rc = ROUND_CONST_128A
             rc_prime = ROUND_CONST_PRIME_128A
-    total = key_bytes // state_bytes          # a + b + 2
+    total = key_bytes // state_bytes  # a + b + 2
     # (a, b) per variant
     if block_bits == 64:
         ra, rb = 2, 3
@@ -184,6 +955,7 @@ def _variant_config(block_bits, tweak_bits, key_bytes):
 # ---------------------------------------------------------------------------
 # Key schedule (ported faithfully from the reference implementation)
 # ---------------------------------------------------------------------------
+
 
 def _hash_func(key, t, hk_len, state_bytes, tweak_bytes):
     """Compute h = H(k) for a single hash function.
@@ -203,9 +975,9 @@ def _hash_func(key, t, hk_len, state_bytes, tweak_bytes):
                 temp[tweak_bytes - 1 - j] = left ^ right
             p = 0
             for j in range(tweak_bytes):
-                p ^= (t[j] & temp[j])
+                p ^= t[j] & temp[j]
                 p &= 0xFF
-            h[state_bytes - 1 - i] ^= (HW2[p] << l)
+            h[state_bytes - 1 - i] ^= HW2[p] << l
             h[state_bytes - 1 - i] &= 0xFF
     return h
 
@@ -223,7 +995,7 @@ def _generate_round_key(master_key, t, state_bytes, tweak_bytes, key_bytes):
             byte_idx = bit_index // 8
             bit_in_byte = bit_index % 8
             bit_val = (master_key[byte_idx] >> bit_in_byte) & 1
-            key_prime[i] ^= (bit_val << j)
+            key_prime[i] ^= bit_val << j
             key_prime[i] &= 0xFF
 
     rk = [[0] * state_bytes for _ in range(ra_rb(state_bytes, key_bytes))]
@@ -268,6 +1040,7 @@ def _bytes_to_int(byte_list):
 # Component construction helpers
 # ---------------------------------------------------------------------------
 
+
 def _mix_columns(state_bytes):
     r"""Build the full-state MixColumn LinearLayer.
 
@@ -304,8 +1077,9 @@ def _mix_columns(state_bytes):
                     row = total_bits - 1 - (4 * o + b)
                     col = total_bits - 1 - (4 * i + b)
                     mat[row, col] = 1
-    mc = LinearLayer_CVL(mat, branch_number_differential=4,
-                         branch_number_linear=4, name="MixColumns")
+    mc = LinearLayer_CVL(
+        mat, branch_number_differential=4, branch_number_linear=4, name="MixColumns"
+    )
     return mc
 
 
@@ -336,6 +1110,7 @@ def _vec_perm(pbox, state_nibbles):
 # ---------------------------------------------------------------------------
 # Public cipher class
 # ---------------------------------------------------------------------------
+
 
 class BLINK_CVL:
     r"""
@@ -499,9 +1274,20 @@ class BLINK_CVL:
 
     """
 
-    def __init__(self, n=64, t=64, key=0, tweak=0, name=None, a=None, b=None,
-                 start=None, end=None,
-                 include_w0=None, include_w1=None):
+    def __init__(
+        self,
+        n=64,
+        t=64,
+        key=0,
+        tweak=0,
+        name=None,
+        a=None,
+        b=None,
+        start=None,
+        end=None,
+        include_w0=None,
+        include_w1=None,
+    ):
         if name is None:
             name = f"Blink-{n}"
 
@@ -509,7 +1295,11 @@ class BLINK_CVL:
         assert t in [64, 128, 256], f"Tweak size {t} not supported!"
 
         state_bytes, tweak_bytes, ra, rb, pbox, rc, rc_prime = _variant_config(
-            n, t, (key.bit_length() + 7) // 8 if key else (n // 8) * (ra_rb_from_n_t(n, t) + 2)
+            n,
+            t,
+            (key.bit_length() + 7) // 8
+            if key
+            else (n // 8) * (ra_rb_from_n_t(n, t) + 2),
         )
 
         # Determine whether we are in slicing mode or legacy reduced-round mode.
@@ -519,17 +1309,15 @@ class BLINK_CVL:
         # and the h1 S-box).
         total_sbox_rounds = 2 * (ra + rb) + 4
         if slicing:
-            assert end is not None, (
-                "end must be provided when start is set"
-            )
+            assert end is not None, "end must be provided when start is set"
             assert 1 <= start <= end <= total_sbox_rounds, (
                 f"start={start}, end={end} are "
                 f"out of range for this variant (1..{total_sbox_rounds})"
             )
             if include_w0 is None:
-                include_w0 = (start == 1)
+                include_w0 = start == 1
             if include_w1 is None:
-                include_w1 = (end == total_sbox_rounds)
+                include_w1 = end == total_sbox_rounds
         else:
             if a is None:
                 a = ra
@@ -577,15 +1365,15 @@ class BLINK_CVL:
 
         # SubCells: S-box applied to every nibble.
         sbox = SBox_CVL(SBOX, name="SBox")
-        subcells = WordSBoxCipher(word, state_nibbles, state_nibbles,
-                                  name="SubCells")
+        subcells = WordSBoxCipher(word, state_nibbles, state_nibbles, name="SubCells")
         for i in range(state_nibbles):
             node = subcells.add_subcipher(sbox, [(subcells.IN, (i, 0))])
             subcells.add_output([(node, (0, i))])
 
         # MixColumns: full-state application of M (see ``_mix_columns``).
-        mixcolumns = WordSBoxCipher(word, state_nibbles, state_nibbles,
-                                    name="MixColumns")
+        mixcolumns = WordSBoxCipher(
+            word, state_nibbles, state_nibbles, name="MixColumns"
+        )
         mc = _mix_columns(state_bytes)
         node = mixcolumns.add_subcipher(
             mc, [(mixcolumns.IN, (i, i)) for i in range(state_nibbles)]
@@ -596,8 +1384,7 @@ class BLINK_CVL:
         # ``output[i] = input[pbox[i]]`` in LSB-first nibble order; we convert
         # it to CiVerLy's MSB-first vector convention via ``_vec_perm``.
         perm = PermuteLayer_CVL(
-            _vec_perm(pbox, state_nibbles), word_coarseness=word,
-            name="Permutation"
+            _vec_perm(pbox, state_nibbles), word_coarseness=word, name="Permutation"
         )
         inv_perm = perm.inv()
 
@@ -606,8 +1393,7 @@ class BLINK_CVL:
             return RoundkeyXOR_CVL(state_nibbles * word, const, name="RK")
 
         # ----- Compose the forward keyed round -----------------------------
-        fwd_round = WordSBoxCipher(word, state_nibbles, state_nibbles,
-                                   name="FwdRound")
+        fwd_round = WordSBoxCipher(word, state_nibbles, state_nibbles, name="FwdRound")
         node = fwd_round.add_subcipher(
             subcells, [(fwd_round.IN, (i, i)) for i in range(state_nibbles)]
         )
@@ -626,8 +1412,7 @@ class BLINK_CVL:
         fwd_round.add_output([(node, (i, i)) for i in range(state_nibbles)])
 
         # ----- Compose the backward (inverse) keyed round ------------------
-        bwd_round = WordSBoxCipher(word, state_nibbles, state_nibbles,
-                                   name="BwdRound")
+        bwd_round = WordSBoxCipher(word, state_nibbles, state_nibbles, name="BwdRound")
         node = bwd_round.add_subcipher(
             inv_perm, [(bwd_round.IN, (i, i)) for i in range(state_nibbles)]
         )
@@ -772,7 +1557,8 @@ class BLINK_CVL:
                             mixcolumns, [(node, (i, i)) for i in range(state_nibbles)]
                         )
                         node = cipher.add_subcipher(
-                            rk_xor(h_xor_int), [(node, (i, i)) for i in range(state_nibbles)]
+                            rk_xor(h_xor_int),
+                            [(node, (i, i)) for i in range(state_nibbles)],
                         )
                 elif r == ra + rb + 3:
                     # Second S-box of the hxor stage

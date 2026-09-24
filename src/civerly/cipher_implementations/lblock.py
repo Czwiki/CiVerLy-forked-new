@@ -1,23 +1,26 @@
 from sage.crypto.sbox import SBox
 from civerly.sboxcipher import SBoxCipher
 from civerly.component import (
-    SBox_CVL, PermuteLayer_CVL, RotateLayer_CVL,
-    RoundkeyXOR_CVL, XOR_CVL,
+    SBox_CVL,
+    PermuteLayer_CVL,
+    RotateLayer_CVL,
+    RoundkeyXOR_CVL,
+    XOR_CVL,
 )
 
 
 # S-boxes used in LBlock (s0 through s9)
 _SBOX_TABLES = [
-    [14, 9, 15, 0, 13, 4, 10, 11, 1, 2, 8, 3, 7, 6, 12, 5],   # s0
-    [4, 11, 14, 9, 15, 13, 0, 10, 7, 12, 5, 6, 2, 8, 1, 3],    # s1
-    [1, 14, 7, 12, 15, 13, 0, 6, 11, 5, 9, 3, 2, 4, 8, 10],    # s2
-    [7, 6, 8, 11, 0, 15, 3, 14, 9, 10, 12, 13, 5, 2, 4, 1],    # s3
-    [14, 5, 15, 0, 7, 2, 12, 13, 1, 8, 4, 9, 11, 10, 6, 3],    # s4
-    [2, 13, 11, 12, 15, 14, 0, 9, 7, 10, 6, 3, 1, 8, 4, 5],    # s5
-    [11, 9, 4, 14, 0, 15, 10, 13, 6, 12, 5, 7, 3, 8, 1, 2],    # s6
-    [13, 10, 15, 0, 14, 4, 9, 11, 2, 1, 8, 3, 7, 5, 12, 6],    # s7
-    [8, 7, 14, 5, 15, 13, 0, 6, 11, 12, 9, 10, 2, 4, 1, 3],    # s8
-    [11, 5, 15, 0, 7, 2, 9, 13, 4, 8, 1, 12, 14, 10, 3, 6],    # s9
+    [14, 9, 15, 0, 13, 4, 10, 11, 1, 2, 8, 3, 7, 6, 12, 5],  # s0
+    [4, 11, 14, 9, 15, 13, 0, 10, 7, 12, 5, 6, 2, 8, 1, 3],  # s1
+    [1, 14, 7, 12, 15, 13, 0, 6, 11, 5, 9, 3, 2, 4, 8, 10],  # s2
+    [7, 6, 8, 11, 0, 15, 3, 14, 9, 10, 12, 13, 5, 2, 4, 1],  # s3
+    [14, 5, 15, 0, 7, 2, 12, 13, 1, 8, 4, 9, 11, 10, 6, 3],  # s4
+    [2, 13, 11, 12, 15, 14, 0, 9, 7, 10, 6, 3, 1, 8, 4, 5],  # s5
+    [11, 9, 4, 14, 0, 15, 10, 13, 6, 12, 5, 7, 3, 8, 1, 2],  # s6
+    [13, 10, 15, 0, 14, 4, 9, 11, 2, 1, 8, 3, 7, 5, 12, 6],  # s7
+    [8, 7, 14, 5, 15, 13, 0, 6, 11, 12, 9, 10, 2, 4, 1, 3],  # s8
+    [11, 5, 15, 0, 7, 2, 9, 13, 4, 8, 1, 12, 14, 10, 3, 6],  # s9
 ]
 
 # Build reusable Sage SBox objects
@@ -43,9 +46,7 @@ def _build_sbox_layer():
             sbox,
             [(sboxlayer.IN, (src_start + j, j)) for j in range(4)],
         )
-        sboxlayer.add_output(
-            [(node, (j, src_start + j)) for j in range(4)]
-        )
+        sboxlayer.add_output([(node, (j, src_start + j)) for j in range(4)])
     return sboxlayer
 
 
@@ -235,12 +236,8 @@ class LBLOCK_CVL:
             + [(node_rot, (i, i + 32)) for i in range(32)],
         )
         # new left = xor result, new right = old left
-        lblock_round.add_output(
-            [(node_xor, (i, i)) for i in range(32)]
-        )
-        lblock_round.add_output(
-            [(lblock_round.IN, (i, i + 32)) for i in range(32)]
-        )
+        lblock_round.add_output([(node_xor, (i, i)) for i in range(32)])
+        lblock_round.add_output([(lblock_round.IN, (i, i + 32)) for i in range(32)])
 
         # Full cipher
         cipher = SBoxCipher(64, 64, name=name)
@@ -256,9 +253,7 @@ class LBLOCK_CVL:
         final_swap = PermuteLayer_CVL(
             list(range(32, 64)) + list(range(32)), name="FinalSwap"
         )
-        node = cipher.add_subcipher(
-            final_swap, [(node, (i, i)) for i in range(64)]
-        )
+        node = cipher.add_subcipher(final_swap, [(node, (i, i)) for i in range(64)])
         cipher.add_output([(node, (i, i)) for i in range(64)])
 
         self.cipher = cipher

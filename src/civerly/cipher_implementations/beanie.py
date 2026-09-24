@@ -130,14 +130,22 @@ def _tks_shift(state):
     new_left |= left & 0xF000F000F000F000
     new_right |= right & 0xF000F000F000F000
 
-    new_left |= ((left & 0x000000000F000F00) << 32) | ((right & 0x0F000F0000000000) >> 32)
-    new_right |= ((right & 0x000000000F000F00) << 32) | ((left & 0x0F000F0000000000) >> 32)
+    new_left |= ((left & 0x000000000F000F00) << 32) | (
+        (right & 0x0F000F0000000000) >> 32
+    )
+    new_right |= ((right & 0x000000000F000F00) << 32) | (
+        (left & 0x0F000F0000000000) >> 32
+    )
 
     new_left |= right & 0x00F000F000F000F0
     new_right |= left & 0x00F000F000F000F0
 
-    new_left |= ((left & 0x000F000F00000000) >> 32) | ((right & 0x00000000000F000F) << 32)
-    new_right |= ((right & 0x000F000F00000000) >> 32) | ((left & 0x00000000000F000F) << 32)
+    new_left |= ((left & 0x000F000F00000000) >> 32) | (
+        (right & 0x00000000000F000F) << 32
+    )
+    new_right |= ((right & 0x000F000F00000000) >> 32) | (
+        (left & 0x00000000000F000F) << 32
+    )
 
     return new_left & 0xFFFFFFFFFFFFFFFF, new_right & 0xFFFFFFFFFFFFFFFF
 
@@ -216,8 +224,7 @@ def _split128(value):
         left, right = value
     except Exception as exc:
         raise ValueError(
-            "master_key and tweak must be 128-bit integers or pairs "
-            "of 64-bit integers"
+            "master_key and tweak must be 128-bit integers or pairs of 64-bit integers"
         ) from exc
     return (int(left) & 0xFFFFFFFFFFFFFFFF, int(right) & 0xFFFFFFFFFFFFFFFF)
 
@@ -243,8 +250,19 @@ def _derive_round_keys(master_key, tweak, R):
 
 
 class BEANIE_CVL:
-    def __init__(self, R=5, start=None, end=None, rks=None, master_key=None,
-                 tweak=None, name=None, rl=None, rr=None, rks_right=None):
+    def __init__(
+        self,
+        R=5,
+        start=None,
+        end=None,
+        rks=None,
+        master_key=None,
+        tweak=None,
+        name=None,
+        rl=None,
+        rr=None,
+        rks_right=None,
+    ):
         r"""
         The CiVerLy implementation of BEANIE.
 
@@ -509,9 +527,7 @@ class BEANIE_CVL:
             if rks is None:
                 rks = [0] * (R + 1)
             if len(rks) != R + 1:
-                raise ValueError(
-                    f"rks must have length R+1 = {R+1}, got {len(rks)}"
-                )
+                raise ValueError(f"rks must have length R+1 = {R + 1}, got {len(rks)}")
         else:
             if rl is None:
                 rl = 0
@@ -521,20 +537,18 @@ class BEANIE_CVL:
                 rks = [0] * (rl + 1)
             if len(rks) != rl + 1:
                 raise ValueError(
-                    f"rks must have length rl+1 = {rl+1}, got {len(rks)}"
+                    f"rks must have length rl+1 = {rl + 1}, got {len(rks)}"
                 )
             if rks_right is None:
                 rks_right = [0] * (rr + 1)
             if len(rks_right) != rr + 1:
                 raise ValueError(
-                    "rks_right must have length rr+1 = "
-                    f"{rr+1}, got {len(rks_right)}"
+                    f"rks_right must have length rr+1 = {rr + 1}, got {len(rks_right)}"
                 )
 
         # BEANIE S-box
         sbox = SBox_CVL(
-            SBox([0, 4, 2, 11, 10, 12, 9, 8, 5, 15, 13, 3, 7, 1, 6, 14]),
-            name="SBox"
+            SBox([0, 4, 2, 11, 10, 12, 9, 8, 5, 15, 13, 3, 7, 1, 6, 14]), name="SBox"
         )
 
         # S-box layer (8 S-boxes in parallel)
@@ -545,19 +559,20 @@ class BEANIE_CVL:
 
         # ShiftRows: rows 1 and 3 are rotated left by 1
         shiftrows = PermuteLayer_CVL(
-            [0, 5, 2, 7, 4, 1, 6, 3],
-            word_coarseness=4,
-            name="ShiftRows"
+            [0, 5, 2, 7, 4, 1, 6, 3], word_coarseness=4, name="ShiftRows"
         )
 
         # MixColumns: GF(2^4) MDS matrix with primitive polynomial x^4 + x + 1
         # Build per-nibble binary multiplication matrices
-        mul2 = matrix(GF(2), [
-            [0, 0, 0, 1],
-            [1, 0, 0, 1],
-            [0, 1, 0, 0],
-            [0, 0, 1, 0],
-        ])
+        mul2 = matrix(
+            GF(2),
+            [
+                [0, 0, 0, 1],
+                [1, 0, 0, 1],
+                [0, 1, 0, 0],
+                [0, 0, 1, 0],
+            ],
+        )
         mul1 = identity_matrix(GF(2), 4)
         mul4 = mul2 * mul2
         mul8 = mul2 * mul2 * mul2
@@ -567,12 +582,16 @@ class BEANIE_CVL:
 
         # The matrix below is constructed for LSB-first order, then conjugated
         # by a full bit-reversal to match the MSB-first convention of int_to_vec.
-        mix_matrix_lsb = block_matrix(GF(2), [
-            [mul2, mul1, muld, mul1],
-            [mul1, mul4, mul9, muld],
-            [mul1, mulf, mul4, mul1],
-            [mul9, mul1, mul1, mul2],
-        ], subdivide=False)
+        mix_matrix_lsb = block_matrix(
+            GF(2),
+            [
+                [mul2, mul1, muld, mul1],
+                [mul1, mul4, mul9, muld],
+                [mul1, mulf, mul4, mul1],
+                [mul9, mul1, mul1, mul2],
+            ],
+            subdivide=False,
+        )
 
         P16 = matrix(GF(2), 16, 16)
         for i in range(16):
@@ -583,7 +602,7 @@ class BEANIE_CVL:
             mix_matrix,
             branch_number_differential=5,
             branch_number_linear=5,
-            name="MixColumn"
+            name="MixColumn",
         )
 
         # Full round: KeyAdd -> SBox -> ShiftRows -> MixColumns
@@ -600,11 +619,9 @@ class BEANIE_CVL:
         )
         for j in range(2):
             node_mix = beanie_round.add_subcipher(
-                mixcolumn, [(node_p, (i + 4*j, i)) for i in range(4)]
+                mixcolumn, [(node_p, (i + 4 * j, i)) for i in range(4)]
             )
-            beanie_round.add_output(
-                [(node_mix, (i, i + 4*j)) for i in range(4)]
-            )
+            beanie_round.add_output([(node_mix, (i, i + 4 * j)) for i in range(4)])
 
         # Last round: KeyAdd -> SBox -> ShiftRows (no MixColumns)
         key_add_last = RoundkeyXOR_CVL(32, const=0x0, name="KeyAdd")
@@ -640,9 +657,7 @@ class BEANIE_CVL:
                 node = beanie_cipher.add_subcipher(
                     beanie_last, [(node, (i, i)) for i in range(8)]
                 )
-                key_add_final = RoundkeyXOR_CVL(
-                    32, const=rks[R], name="KeyAdd"
-                )
+                key_add_final = RoundkeyXOR_CVL(32, const=rks[R], name="KeyAdd")
                 node = beanie_cipher.add_subcipher(
                     key_add_final, [(node, (i, i)) for i in range(8)]
                 )
@@ -656,9 +671,7 @@ class BEANIE_CVL:
         sbox_inv = SBox_CVL(sbox.S.inverse(), name="SBox_inv")
         sboxlayer_inv = AESlike(4, 4, 2, name="SBoxLayer_inv")
         for i in range(8):
-            node = sboxlayer_inv.add_subcipher(
-                sbox_inv, [(sboxlayer_inv.IN, (i, 0))]
-            )
+            node = sboxlayer_inv.add_subcipher(sbox_inv, [(sboxlayer_inv.IN, (i, 0))])
             sboxlayer_inv.add_output([(node, (0, i))])
 
         # Inverse last block: KeyAdd -> ShiftRows -> SBox_inv -> KeyAdd
@@ -666,53 +679,41 @@ class BEANIE_CVL:
         key_add_inv_first = RoundkeyXOR_CVL(32, const=0x0, name="KeyAdd")
         beanie_inv_last = AESlike(4, 4, 2, name="BEANIE-inv-last")
         node_rk_inv_first = beanie_inv_last.add_subcipher(
-            key_add_inv_first,
-            [(beanie_inv_last.IN, (i, i)) for i in range(8)]
+            key_add_inv_first, [(beanie_inv_last.IN, (i, i)) for i in range(8)]
         )
         node_p_inv = beanie_inv_last.add_subcipher(
-            shiftrows,
-            [(node_rk_inv_first, (i, i)) for i in range(8)]
+            shiftrows, [(node_rk_inv_first, (i, i)) for i in range(8)]
         )
         node_s_inv = beanie_inv_last.add_subcipher(
-            sboxlayer_inv,
-            [(node_p_inv, (i, i)) for i in range(8)]
+            sboxlayer_inv, [(node_p_inv, (i, i)) for i in range(8)]
         )
         key_add_inv_second = RoundkeyXOR_CVL(32, const=0x0, name="KeyAdd")
         node_rk_inv_second = beanie_inv_last.add_subcipher(
-            key_add_inv_second,
-            [(node_s_inv, (i, i)) for i in range(8)]
+            key_add_inv_second, [(node_s_inv, (i, i)) for i in range(8)]
         )
-        beanie_inv_last.add_output(
-            [(node_rk_inv_second, (i, i)) for i in range(8)]
-        )
+        beanie_inv_last.add_output([(node_rk_inv_second, (i, i)) for i in range(8)])
 
         # Inverse round block: MixColumns -> ShiftRows -> SBox_inv -> KeyAdd
         beanie_inv_round = AESlike(4, 4, 2, name="BEANIE-inv-round")
         node_mix0 = beanie_inv_round.add_subcipher(
-            mixcolumn,
-            [(beanie_inv_round.IN, (i, i)) for i in range(4)]
+            mixcolumn, [(beanie_inv_round.IN, (i, i)) for i in range(4)]
         )
         node_mix1 = beanie_inv_round.add_subcipher(
-            mixcolumn,
-            [(beanie_inv_round.IN, (i + 4, i)) for i in range(4)]
+            mixcolumn, [(beanie_inv_round.IN, (i + 4, i)) for i in range(4)]
         )
         node_p_inv = beanie_inv_round.add_subcipher(
             shiftrows,
-            [(node_mix0, (i, i)) for i in range(4)] +
-            [(node_mix1, (i, i + 4)) for i in range(4)]
+            [(node_mix0, (i, i)) for i in range(4)]
+            + [(node_mix1, (i, i + 4)) for i in range(4)],
         )
         node_s_inv = beanie_inv_round.add_subcipher(
-            sboxlayer_inv,
-            [(node_p_inv, (i, i)) for i in range(8)]
+            sboxlayer_inv, [(node_p_inv, (i, i)) for i in range(8)]
         )
         key_add_inv_round = RoundkeyXOR_CVL(32, const=0x0, name="KeyAdd")
         node_rk_inv_round = beanie_inv_round.add_subcipher(
-            key_add_inv_round,
-            [(node_s_inv, (i, i)) for i in range(8)]
+            key_add_inv_round, [(node_s_inv, (i, i)) for i in range(8)]
         )
-        beanie_inv_round.add_output(
-            [(node_rk_inv_round, (i, i)) for i in range(8)]
-        )
+        beanie_inv_round.add_output([(node_rk_inv_round, (i, i)) for i in range(8)])
 
         # Assemble the U-shape cipher
         beanie_cipher = AESlike(4, 4, 2, name=f"{name}-U-{rl}-{rr}")
@@ -729,9 +730,7 @@ class BEANIE_CVL:
             node = beanie_cipher.add_subcipher(
                 beanie_last, [(node, (i, i)) for i in range(8)]
             )
-            key_add_final_left = RoundkeyXOR_CVL(
-                32, const=rks[rl], name="KeyAdd"
-            )
+            key_add_final_left = RoundkeyXOR_CVL(32, const=rks[rl], name="KeyAdd")
             node = beanie_cipher.add_subcipher(
                 key_add_final_left, [(node, (i, i)) for i in range(8)]
             )

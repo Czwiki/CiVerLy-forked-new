@@ -27,35 +27,278 @@ from sage.matrix.constructor import Matrix as matrix
 
 from civerly.sboxcipher import SBoxCipher
 from civerly.component import (
-    SBox_CVL, LinearLayer_CVL, RoundkeyXOR_CVL, PermuteLayer_CVL
+    SBox_CVL,
+    LinearLayer_CVL,
+    RoundkeyXOR_CVL,
+    PermuteLayer_CVL,
 )
 
 
-PHI = 0x9e3779b9
+PHI = 0x9E3779B9
 
 # ---------------------------------------------------------------------------
 # IP / FP tables from the Serpent specification
 # ---------------------------------------------------------------------------
 IP_TABLE = [
-    0, 32, 64, 96, 1, 33, 65, 97, 2, 34, 66, 98, 3, 35, 67, 99,
-    4, 36, 68, 100, 5, 37, 69, 101, 6, 38, 70, 102, 7, 39, 71, 103,
-    8, 40, 72, 104, 9, 41, 73, 105, 10, 42, 74, 106, 11, 43, 75, 107,
-    12, 44, 76, 108, 13, 45, 77, 109, 14, 46, 78, 110, 15, 47, 79, 111,
-    16, 48, 80, 112, 17, 49, 81, 113, 18, 50, 82, 114, 19, 51, 83, 115,
-    20, 52, 84, 116, 21, 53, 85, 117, 22, 54, 86, 118, 23, 55, 87, 119,
-    24, 56, 88, 120, 25, 57, 89, 121, 26, 58, 90, 122, 27, 59, 91, 123,
-    28, 60, 92, 124, 29, 61, 93, 125, 30, 62, 94, 126, 31, 63, 95, 127
+    0,
+    32,
+    64,
+    96,
+    1,
+    33,
+    65,
+    97,
+    2,
+    34,
+    66,
+    98,
+    3,
+    35,
+    67,
+    99,
+    4,
+    36,
+    68,
+    100,
+    5,
+    37,
+    69,
+    101,
+    6,
+    38,
+    70,
+    102,
+    7,
+    39,
+    71,
+    103,
+    8,
+    40,
+    72,
+    104,
+    9,
+    41,
+    73,
+    105,
+    10,
+    42,
+    74,
+    106,
+    11,
+    43,
+    75,
+    107,
+    12,
+    44,
+    76,
+    108,
+    13,
+    45,
+    77,
+    109,
+    14,
+    46,
+    78,
+    110,
+    15,
+    47,
+    79,
+    111,
+    16,
+    48,
+    80,
+    112,
+    17,
+    49,
+    81,
+    113,
+    18,
+    50,
+    82,
+    114,
+    19,
+    51,
+    83,
+    115,
+    20,
+    52,
+    84,
+    116,
+    21,
+    53,
+    85,
+    117,
+    22,
+    54,
+    86,
+    118,
+    23,
+    55,
+    87,
+    119,
+    24,
+    56,
+    88,
+    120,
+    25,
+    57,
+    89,
+    121,
+    26,
+    58,
+    90,
+    122,
+    27,
+    59,
+    91,
+    123,
+    28,
+    60,
+    92,
+    124,
+    29,
+    61,
+    93,
+    125,
+    30,
+    62,
+    94,
+    126,
+    31,
+    63,
+    95,
+    127,
 ]
 
 FP_TABLE = [
-    0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60,
-    64, 68, 72, 76, 80, 84, 88, 92, 96, 100, 104, 108, 112, 116, 120, 124,
-    1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 49, 53, 57, 61,
-    65, 69, 73, 77, 81, 85, 89, 93, 97, 101, 105, 109, 113, 117, 121, 125,
-    2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62,
-    66, 70, 74, 78, 82, 86, 90, 94, 98, 102, 106, 110, 114, 118, 122, 126,
-    3, 7, 11, 15, 19, 23, 27, 31, 35, 39, 43, 47, 51, 55, 59, 63,
-    67, 71, 75, 79, 83, 87, 91, 95, 99, 103, 107, 111, 115, 119, 123, 127
+    0,
+    4,
+    8,
+    12,
+    16,
+    20,
+    24,
+    28,
+    32,
+    36,
+    40,
+    44,
+    48,
+    52,
+    56,
+    60,
+    64,
+    68,
+    72,
+    76,
+    80,
+    84,
+    88,
+    92,
+    96,
+    100,
+    104,
+    108,
+    112,
+    116,
+    120,
+    124,
+    1,
+    5,
+    9,
+    13,
+    17,
+    21,
+    25,
+    29,
+    33,
+    37,
+    41,
+    45,
+    49,
+    53,
+    57,
+    61,
+    65,
+    69,
+    73,
+    77,
+    81,
+    85,
+    89,
+    93,
+    97,
+    101,
+    105,
+    109,
+    113,
+    117,
+    121,
+    125,
+    2,
+    6,
+    10,
+    14,
+    18,
+    22,
+    26,
+    30,
+    34,
+    38,
+    42,
+    46,
+    50,
+    54,
+    58,
+    62,
+    66,
+    70,
+    74,
+    78,
+    82,
+    86,
+    90,
+    94,
+    98,
+    102,
+    106,
+    110,
+    114,
+    118,
+    122,
+    126,
+    3,
+    7,
+    11,
+    15,
+    19,
+    23,
+    27,
+    31,
+    35,
+    39,
+    43,
+    47,
+    51,
+    55,
+    59,
+    63,
+    67,
+    71,
+    75,
+    79,
+    83,
+    87,
+    91,
+    95,
+    99,
+    103,
+    107,
+    111,
+    115,
+    119,
+    123,
+    127,
 ]
 
 
@@ -74,9 +317,9 @@ def _rotl32(x, n):
 
     OUTPUT: The rotated 32-bit word.
     """
-    x = int(x) & 0xffffffff
+    x = int(x) & 0xFFFFFFFF
     n = int(n) % 32
-    return ((x << n) | (x >> (32 - n))) & 0xffffffff
+    return ((x << n) | (x >> (32 - n))) & 0xFFFFFFFF
 
 
 def _apply_perm_int(x, perm):
@@ -167,14 +410,13 @@ def serpent_key_schedule(master_key, keylen=128, R=32):
         key = int(master_key)
 
     # Split 256 key bits into 8 little-endian words.
-    w_init = [(key >> (32 * i)) & 0xffffffff for i in range(8)]
+    w_init = [(key >> (32 * i)) & 0xFFFFFFFF for i in range(8)]
 
     # Prekey expansion: w[i] for i = -8 .. 131
     raw_w = w_init + [0] * 132
     for i in range(132):
         raw_w[i + 8] = _rotl32(
-            raw_w[i] ^ raw_w[i + 3] ^ raw_w[i + 5] ^ raw_w[i + 7] ^ PHI ^ i,
-            11
+            raw_w[i] ^ raw_w[i + 3] ^ raw_w[i + 5] ^ raw_w[i + 7] ^ PHI ^ i, 11
         )
 
     w = raw_w[8:140]
@@ -216,12 +458,12 @@ def serpent_key_schedule(master_key, keylen=128, R=32):
 # S-boxes
 # ---------------------------------------------------------------------------
 SERPENT_SBOXES = [
-    SBox_sage([3, 8, 15, 1, 10, 6, 5, 11, 14, 13, 4, 2, 7, 0, 9, 12]),   # S0
+    SBox_sage([3, 8, 15, 1, 10, 6, 5, 11, 14, 13, 4, 2, 7, 0, 9, 12]),  # S0
     SBox_sage([15, 12, 2, 7, 9, 0, 5, 10, 1, 11, 14, 8, 6, 13, 3, 4]),  # S1
-    SBox_sage([8, 6, 7, 9, 3, 12, 10, 15, 13, 1, 14, 4, 0, 11, 5, 2]), # S2
+    SBox_sage([8, 6, 7, 9, 3, 12, 10, 15, 13, 1, 14, 4, 0, 11, 5, 2]),  # S2
     SBox_sage([0, 15, 11, 8, 12, 9, 6, 3, 13, 1, 2, 4, 10, 7, 5, 14]),  # S3
-    SBox_sage([1, 15, 8, 3, 12, 0, 11, 6, 2, 5, 4, 10, 9, 14, 7, 13]), # S4
-    SBox_sage([15, 5, 2, 11, 4, 10, 9, 12, 0, 3, 14, 8, 13, 6, 7, 1]), # S5
+    SBox_sage([1, 15, 8, 3, 12, 0, 11, 6, 2, 5, 4, 10, 9, 14, 7, 13]),  # S4
+    SBox_sage([15, 5, 2, 11, 4, 10, 9, 12, 0, 3, 14, 8, 13, 6, 7, 1]),  # S5
     SBox_sage([7, 2, 12, 5, 8, 4, 6, 11, 14, 9, 1, 15, 13, 3, 10, 0]),  # S6
     SBox_sage([1, 13, 15, 0, 14, 8, 2, 11, 7, 4, 12, 10, 9, 3, 5, 6]),  # S7
 ]
@@ -519,14 +761,16 @@ class SERPENT_CVL:
 
     """
 
-    def __init__(self, R=32, rks=None, master_key=None, keylen=128, name=None, start=0, end=None):
+    def __init__(
+        self, R=32, rks=None, master_key=None, keylen=128, name=None, start=0, end=None
+    ):
         if name is None:
             name = "SERPENT"
 
         if master_key is not None and rks is not None:
             raise ValueError("master_key and rks are mutually exclusive")
 
-        explicit_slice = (end is not None)
+        explicit_slice = end is not None
         if explicit_slice and R != 32:
             raise ValueError("R cannot be combined with an explicit (start, end) range")
         if not explicit_slice and start != 0:
@@ -551,11 +795,11 @@ class SERPENT_CVL:
         if rks is None:
             if master_key is not None:
                 full_rks = serpent_key_schedule(master_key, keylen=keylen, R=32)
-                rks = full_rks[start:start + R + 1]
+                rks = full_rks[start : start + R + 1]
             else:
                 rks = [0 for _ in range(R + 1)]
         elif len(rks) < R + 1:
-            raise ValueError(f"Need at least {R+1} round keys, got {len(rks)}")
+            raise ValueError(f"Need at least {R + 1} round keys, got {len(rks)}")
 
         lt = _build_serpent_linear_layer()
 
@@ -569,12 +813,9 @@ class SERPENT_CVL:
                     SERPENT_SBOXES[sbox_idx], name=f"S{sbox_idx}_R{round_num}_{n}"
                 )
                 node = sboxlayer.add_subcipher(
-                    sbox,
-                    [(sboxlayer.IN, (in_pos[3 - k], k)) for k in range(4)]
+                    sbox, [(sboxlayer.IN, (in_pos[3 - k], k)) for k in range(4)]
                 )
-                output_edges.extend(
-                    [(node, (k, in_pos[3 - k])) for k in range(4)]
-                )
+                output_edges.extend([(node, (k, in_pos[3 - k])) for k in range(4)])
             sboxlayer.add_output(output_edges)
             return sboxlayer
 
@@ -630,9 +871,7 @@ class SERPENT_CVL:
         # Final permutation: standard-permuted -> standard
         if not exact_slice or end == 31:
             fp = PermuteLayer_CVL(IP_TABLE, name="FP")
-            current = cipher.add_subcipher(
-                fp, [(current, (i, i)) for i in range(128)]
-            )
+            current = cipher.add_subcipher(fp, [(current, (i, i)) for i in range(128)])
 
         cipher.add_output([(current, (i, i)) for i in range(128)])
 

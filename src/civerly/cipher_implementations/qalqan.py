@@ -80,7 +80,264 @@ from civerly.component import (
 # Qalqan S-box (Figure 1 in the paper / ``documentation/qalqan.py::SBOX``)
 # ---------------------------------------------------------------------------
 
-SBOX = [0xEB,0x89,0xDB,0xCB,0xF3,0xF5,0xFB,0x90,0xE6,0x3D,0xE5,0x2E,0xE3,0x0B,0x56,0xE1,0x6C,0x12,0x80,0x28,0xED,0x22,0x09,0x4A,0xEE,0x27,0x9B,0x58,0x35,0x57,0xEF,0x94,0x29,0xC0,0x16,0x7C,0x5E,0x87,0x0A,0x7E,0xE8,0x11,0x0E,0xAF,0x9A,0x84,0x3A,0x1A,0x69,0x71,0x8C,0xBC,0xD2,0x55,0x33,0xD1,0x85,0x75,0xB5,0x83,0xE9,0x50,0x54,0xAC,0x8A,0xD6,0x7F,0x1F,0x14,0x4E,0x21,0x82,0x30,0x24,0xDD,0x9F,0x1B,0x32,0x20,0xA8,0x6A,0xB0,0x97,0x62,0x19,0xD8,0xC8,0x0C,0x52,0x02,0x5C,0x43,0x03,0x95,0x13,0x81,0xAB,0x77,0xA6,0xF2,0x59,0x67,0x41,0xEC,0x76,0x98,0xB4,0x73,0x86,0x9C,0xF7,0xCF,0xDC,0xBA,0xA4,0xFD,0xC4,0x99,0xDF,0xCE,0xEA,0x1C,0x36,0xBD,0x34,0xD7,0x49,0x64,0x5A,0x6F,0x74,0x01,0xA0,0x39,0x91,0x00,0x15,0x3F,0x38,0xB8,0x8F,0x26,0x5F,0xF8,0x07,0xA3,0x0D,0xDA,0xF0,0xE7,0xD0,0xD9,0x93,0xF6,0x06,0x47,0x0F,0xA1,0x4B,0xC5,0x2A,0xFF,0x46,0x60,0xD5,0x1D,0x2F,0xA9,0x92,0x17,0x72,0x8E,0x7A,0xAA,0x18,0x6E,0x37,0x08,0x1E,0x63,0x31,0xC2,0xBF,0xC6,0x9E,0x65,0xD4,0x3B,0x96,0x9D,0xDE,0x45,0xCA,0x2D,0xA5,0xFE,0x4D,0xB9,0x66,0xC3,0xB3,0xCC,0xAD,0x61,0xBE,0x7B,0x68,0x88,0x25,0x2B,0x53,0x5B,0x44,0x40,0xA7,0xA2,0x5D,0xC9,0x51,0xAE,0xE4,0xC7,0xF9,0x78,0x70,0xCD,0x42,0x4F,0x4C,0x3C,0xE0,0x3E,0x7D,0xB7,0xD3,0xB2,0xF1,0x8D,0x79,0x8B,0x6B,0xE2,0x10,0x23,0x04,0x6D,0xC1,0xFC,0x05,0xB6,0xF4,0x48,0xBB,0xB1,0x2C,0xFA]
+SBOX = [
+    0xEB,
+    0x89,
+    0xDB,
+    0xCB,
+    0xF3,
+    0xF5,
+    0xFB,
+    0x90,
+    0xE6,
+    0x3D,
+    0xE5,
+    0x2E,
+    0xE3,
+    0x0B,
+    0x56,
+    0xE1,
+    0x6C,
+    0x12,
+    0x80,
+    0x28,
+    0xED,
+    0x22,
+    0x09,
+    0x4A,
+    0xEE,
+    0x27,
+    0x9B,
+    0x58,
+    0x35,
+    0x57,
+    0xEF,
+    0x94,
+    0x29,
+    0xC0,
+    0x16,
+    0x7C,
+    0x5E,
+    0x87,
+    0x0A,
+    0x7E,
+    0xE8,
+    0x11,
+    0x0E,
+    0xAF,
+    0x9A,
+    0x84,
+    0x3A,
+    0x1A,
+    0x69,
+    0x71,
+    0x8C,
+    0xBC,
+    0xD2,
+    0x55,
+    0x33,
+    0xD1,
+    0x85,
+    0x75,
+    0xB5,
+    0x83,
+    0xE9,
+    0x50,
+    0x54,
+    0xAC,
+    0x8A,
+    0xD6,
+    0x7F,
+    0x1F,
+    0x14,
+    0x4E,
+    0x21,
+    0x82,
+    0x30,
+    0x24,
+    0xDD,
+    0x9F,
+    0x1B,
+    0x32,
+    0x20,
+    0xA8,
+    0x6A,
+    0xB0,
+    0x97,
+    0x62,
+    0x19,
+    0xD8,
+    0xC8,
+    0x0C,
+    0x52,
+    0x02,
+    0x5C,
+    0x43,
+    0x03,
+    0x95,
+    0x13,
+    0x81,
+    0xAB,
+    0x77,
+    0xA6,
+    0xF2,
+    0x59,
+    0x67,
+    0x41,
+    0xEC,
+    0x76,
+    0x98,
+    0xB4,
+    0x73,
+    0x86,
+    0x9C,
+    0xF7,
+    0xCF,
+    0xDC,
+    0xBA,
+    0xA4,
+    0xFD,
+    0xC4,
+    0x99,
+    0xDF,
+    0xCE,
+    0xEA,
+    0x1C,
+    0x36,
+    0xBD,
+    0x34,
+    0xD7,
+    0x49,
+    0x64,
+    0x5A,
+    0x6F,
+    0x74,
+    0x01,
+    0xA0,
+    0x39,
+    0x91,
+    0x00,
+    0x15,
+    0x3F,
+    0x38,
+    0xB8,
+    0x8F,
+    0x26,
+    0x5F,
+    0xF8,
+    0x07,
+    0xA3,
+    0x0D,
+    0xDA,
+    0xF0,
+    0xE7,
+    0xD0,
+    0xD9,
+    0x93,
+    0xF6,
+    0x06,
+    0x47,
+    0x0F,
+    0xA1,
+    0x4B,
+    0xC5,
+    0x2A,
+    0xFF,
+    0x46,
+    0x60,
+    0xD5,
+    0x1D,
+    0x2F,
+    0xA9,
+    0x92,
+    0x17,
+    0x72,
+    0x8E,
+    0x7A,
+    0xAA,
+    0x18,
+    0x6E,
+    0x37,
+    0x08,
+    0x1E,
+    0x63,
+    0x31,
+    0xC2,
+    0xBF,
+    0xC6,
+    0x9E,
+    0x65,
+    0xD4,
+    0x3B,
+    0x96,
+    0x9D,
+    0xDE,
+    0x45,
+    0xCA,
+    0x2D,
+    0xA5,
+    0xFE,
+    0x4D,
+    0xB9,
+    0x66,
+    0xC3,
+    0xB3,
+    0xCC,
+    0xAD,
+    0x61,
+    0xBE,
+    0x7B,
+    0x68,
+    0x88,
+    0x25,
+    0x2B,
+    0x53,
+    0x5B,
+    0x44,
+    0x40,
+    0xA7,
+    0xA2,
+    0x5D,
+    0xC9,
+    0x51,
+    0xAE,
+    0xE4,
+    0xC7,
+    0xF9,
+    0x78,
+    0x70,
+    0xCD,
+    0x42,
+    0x4F,
+    0x4C,
+    0x3C,
+    0xE0,
+    0x3E,
+    0x7D,
+    0xB7,
+    0xD3,
+    0xB2,
+    0xF1,
+    0x8D,
+    0x79,
+    0x8B,
+    0x6B,
+    0xE2,
+    0x10,
+    0x23,
+    0x04,
+    0x6D,
+    0xC1,
+    0xFC,
+    0x05,
+    0xB6,
+    0xF4,
+    0x48,
+    0xBB,
+    0xB1,
+    0x2C,
+    0xFA,
+]
 
 
 def _byte_rev_int(x):
@@ -209,25 +466,11 @@ def _qalqan_round_keys(key, rounds=None):
         return x
 
     def _feedback_A():
-        f = (
-            SBOX[A[0]]
-            + SBOX[A[3]]
-            + A[7]
-            + SBOX[A[12]]
-            + A[16]
-            + _next_extra()
-        )
+        f = SBOX[A[0]] + SBOX[A[3]] + A[7] + SBOX[A[12]] + A[16] + _next_extra()
         return f & 0xFF
 
     def _feedback_B():
-        f = (
-            SBOX[B[0]]
-            + B[7]
-            + SBOX[B[11]]
-            + B[14]
-            + SBOX[B[15]]
-            + _next_extra()
-        )
+        f = SBOX[B[0]] + B[7] + SBOX[B[11]] + B[14] + SBOX[B[15]] + _next_extra()
         return f & 0xFF
 
     def _clock():
@@ -572,8 +815,9 @@ class QALQAN_CVL:
         True
     """
 
-    def __init__(self, R=None, rks=None, key=None, start_round=None,
-                 end_round=None, name=None):
+    def __init__(
+        self, R=None, rks=None, key=None, start_round=None, end_round=None, name=None
+    ):
         if name is None:
             name = "QALQAN"
 
@@ -591,9 +835,7 @@ class QALQAN_CVL:
         # ---- resolve start_round / end_round --------------------------
         if start_round is not None or end_round is not None:
             if start_round is None or end_round is None:
-                raise ValueError(
-                    "Both 'start_round' and 'end_round' must be provided."
-                )
+                raise ValueError("Both 'start_round' and 'end_round' must be provided.")
             start_round = int(start_round)
             end_round = int(end_round)
             if start_round < 0:
@@ -622,10 +864,7 @@ class QALQAN_CVL:
                     needed = R
             else:
                 needed = full_rounds + 1
-            rks = [
-                int.from_bytes(rk, "big")
-                for rk in _qalqan_round_keys(key, needed)
-            ]
+            rks = [int.from_bytes(rk, "big") for rk in _qalqan_round_keys(key, needed)]
 
         # Validate range
         if end_round >= len(rks):
@@ -635,8 +874,7 @@ class QALQAN_CVL:
             )
         if start_round > end_round:
             raise ValueError(
-                f"Empty round range: start_round={start_round} > "
-                f"end_round={end_round}."
+                f"Empty round range: start_round={start_round} > end_round={end_round}."
             )
 
         # ---- reusable S-box layer -------------------------------------
@@ -646,9 +884,7 @@ class QALQAN_CVL:
             node_sb = sbox_cipher.add_subcipher(
                 sb, [(sbox_cipher.IN, (8 * j + b, b)) for b in range(8)]
             )
-            sbox_cipher.add_output(
-                [(node_sb, (b, 8 * j + b)) for b in range(8)]
-            )
+            sbox_cipher.add_output([(node_sb, (b, 8 * j + b)) for b in range(8)])
 
         # ---- reusable diffusion layer L -------------------------------
         l_cipher = Cipher(128, 128, name="L")
@@ -692,14 +928,24 @@ class QALQAN_CVL:
         R11 = add8(IN, 88, r15, 0)
 
         for node, j in [
-            (R0, 0), (R1, 1), (R2, 2), (R3, 3),
-            (R4, 4), (R5, 5), (R6, 6), (R7, 7),
-            (R8, 8), (R9, 9), (R10, 10), (R11, 11),
-            (R12, 12), (R13, 13), (R14, 14), (R15, 15),
+            (R0, 0),
+            (R1, 1),
+            (R2, 2),
+            (R3, 3),
+            (R4, 4),
+            (R5, 5),
+            (R6, 6),
+            (R7, 7),
+            (R8, 8),
+            (R9, 9),
+            (R10, 10),
+            (R11, 11),
+            (R12, 12),
+            (R13, 13),
+            (R14, 14),
+            (R15, 15),
         ]:
-            l_cipher.add_output(
-                [(node, (b, 8 * j + b)) for b in range(8)]
-            )
+            l_cipher.add_output([(node, (b, 8 * j + b)) for b in range(8)])
 
         # ---- reusable 128-bit round-key addition (mod 2^128) ---------
         add128_cipher = Cipher(128, 128, name="Add128")
@@ -708,9 +954,7 @@ class QALQAN_CVL:
             PermuteLayer_CVL(rev_perm, word_coarseness=8, name="rev_in"),
             [(add128_cipher.IN, (i, i)) for i in range(128)],
         )
-        rk_node = add128_cipher.add_subcipher(
-            RK_CVL(128, const=0, name="rk"), []
-        )
+        rk_node = add128_cipher.add_subcipher(RK_CVL(128, const=0, name="rk"), [])
         modadd_node = add128_cipher.add_subcipher(
             ModAdd_CVL(128, name="ModAdd128"),
             [(rev_in, (i, i)) for i in range(128)]
@@ -720,9 +964,7 @@ class QALQAN_CVL:
             PermuteLayer_CVL(rev_perm, word_coarseness=8, name="rev_out"),
             [(modadd_node, (i, i)) for i in range(128)],
         )
-        add128_cipher.add_output(
-            [(rev_out, (i, i)) for i in range(128)]
-        )
+        add128_cipher.add_output([(rev_out, (i, i)) for i in range(128)])
 
         # ---- reusable middle-round template (ADD, S, L) ---------------
         middle_round = Cipher(128, 128, name="QalqanRound")
@@ -732,9 +974,7 @@ class QALQAN_CVL:
         n_s = middle_round.add_subcipher(
             sbox_cipher, [(n_add, (i, i)) for i in range(128)]
         )
-        n_l = middle_round.add_subcipher(
-            l_cipher, [(n_s, (i, i)) for i in range(128)]
-        )
+        n_l = middle_round.add_subcipher(l_cipher, [(n_s, (i, i)) for i in range(128)])
         middle_round.add_output([(n_l, (i, i)) for i in range(128)])
         # The template is mutated before each instantiation to set the
         # per-round key, mirroring the SPECK_CVL schedule pattern.
@@ -748,30 +988,20 @@ class QALQAN_CVL:
 
         # Round 0 (or the first requested round if start_round == 0)
         if current == 0:
-            kw = RoundkeyXOR_CVL(
-                128, rks[0], name="KeyAdd_start"
-            )
-            node = cipher.add_subcipher(
-                kw, [(node, (i, i)) for i in range(128)]
-            )
+            kw = RoundkeyXOR_CVL(128, rks[0], name="KeyAdd_start")
+            node = cipher.add_subcipher(kw, [(node, (i, i)) for i in range(128)])
             node = cipher.add_subcipher(
                 sbox_cipher, [(node, (i, i)) for i in range(128)]
             )
-            node = cipher.add_subcipher(
-                l_cipher, [(node, (i, i)) for i in range(128)]
-            )
+            node = cipher.add_subcipher(l_cipher, [(node, (i, i)) for i in range(128)])
             current = 1
 
         # Remaining rounds up to end_round
         for r in range(current, end_round + 1):
             if r == end_round and r == full_rounds:
                 # Final whitening (no S, no L)
-                kw = RoundkeyXOR_CVL(
-                    128, rks[r], name="KeyAdd_fin"
-                )
-                node = cipher.add_subcipher(
-                    kw, [(node, (i, i)) for i in range(128)]
-                )
+                kw = RoundkeyXOR_CVL(128, rks[r], name="KeyAdd_fin")
+                node = cipher.add_subcipher(kw, [(node, (i, i)) for i in range(128)])
             else:
                 # ADD → S → L middle round
                 add_node_template.nodes[rk_node].const = _byte_rev_int(rks[r])

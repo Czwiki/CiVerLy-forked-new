@@ -97,34 +97,119 @@ class WARP_CVL:
             name = "WARP"
 
         # 4-bit S-box
-        sbox = SBox([
-            0xc, 0xa, 0xd, 0x3, 0xe, 0xb, 0xf, 0x7,
-            0x8, 0x9, 0x1, 0x5, 0x0, 0x2, 0x4, 0x6
-        ])
+        sbox = SBox(
+            [
+                0xC,
+                0xA,
+                0xD,
+                0x3,
+                0xE,
+                0xB,
+                0xF,
+                0x7,
+                0x8,
+                0x9,
+                0x1,
+                0x5,
+                0x0,
+                0x2,
+                0x4,
+                0x6,
+            ]
+        )
         s = SBox_CVL(sbox, name="S")
 
         # Round constants RC0 and RC1 for rounds 1..41 (0-indexed 0..40)
         RC0 = [
-            0x0, 0x0, 0x1, 0x3, 0x7, 0xf, 0xf, 0xf, 0xe, 0xd,
-            0xa, 0x5, 0xa, 0x5, 0xb, 0x6, 0xc, 0x9, 0x3, 0x6,
-            0xd, 0xb, 0x7, 0xe, 0xd, 0xb, 0x6, 0xd, 0xa, 0x4,
-            0x9, 0x2, 0x4, 0x9, 0x3, 0x7, 0xe, 0xc, 0x8, 0x1,
-            0x2
+            0x0,
+            0x0,
+            0x1,
+            0x3,
+            0x7,
+            0xF,
+            0xF,
+            0xF,
+            0xE,
+            0xD,
+            0xA,
+            0x5,
+            0xA,
+            0x5,
+            0xB,
+            0x6,
+            0xC,
+            0x9,
+            0x3,
+            0x6,
+            0xD,
+            0xB,
+            0x7,
+            0xE,
+            0xD,
+            0xB,
+            0x6,
+            0xD,
+            0xA,
+            0x4,
+            0x9,
+            0x2,
+            0x4,
+            0x9,
+            0x3,
+            0x7,
+            0xE,
+            0xC,
+            0x8,
+            0x1,
+            0x2,
         ]
         RC1 = [
-            0x4, 0xc, 0xc, 0xc, 0xc, 0xc, 0x8, 0x4, 0x8, 0x4,
-            0x8, 0x4, 0xc, 0x8, 0x0, 0x4, 0xc, 0x8, 0x4, 0xc,
-            0xc, 0x8, 0x4, 0xc, 0x8, 0x4, 0x8, 0x0, 0x4, 0x8,
-            0x0, 0x4, 0xc, 0xc, 0x8, 0x0, 0x0, 0x4, 0x8, 0x4,
-            0xc
+            0x4,
+            0xC,
+            0xC,
+            0xC,
+            0xC,
+            0xC,
+            0x8,
+            0x4,
+            0x8,
+            0x4,
+            0x8,
+            0x4,
+            0xC,
+            0x8,
+            0x0,
+            0x4,
+            0xC,
+            0x8,
+            0x4,
+            0xC,
+            0xC,
+            0x8,
+            0x4,
+            0xC,
+            0x8,
+            0x4,
+            0x8,
+            0x0,
+            0x4,
+            0x8,
+            0x0,
+            0x4,
+            0xC,
+            0xC,
+            0x8,
+            0x0,
+            0x0,
+            0x4,
+            0x8,
+            0x4,
+            0xC,
         ]
 
         # Precompute 128-bit round-constant values for RoundkeyXOR_CVL.
         # Word 1 gets RC0, word 3 gets RC1.
-        rc_consts = [
-            (RC0[r] << 120) | (RC1[r] << 112)
-            for r in range(41)
-        ]
+        rc_consts = [(RC0[r] << 120) | (RC1[r] << 112) for r in range(41)]
 
         # Derive round keys
         if rks is not None:
@@ -153,9 +238,42 @@ class WARP_CVL:
 
         # Shuffle permutation on 32 nibbles (wordwise)
         shuffle = PermuteLayer_CVL(
-            [31, 6, 29, 14, 1, 12, 21, 8, 27, 2, 3, 0, 25, 4, 23, 10,
-             15, 22, 13, 30, 17, 28, 5, 24, 11, 18, 19, 16, 9, 20, 7, 26],
-            word_coarseness=4, name="Shuffle"
+            [
+                31,
+                6,
+                29,
+                14,
+                1,
+                12,
+                21,
+                8,
+                27,
+                2,
+                3,
+                0,
+                25,
+                4,
+                23,
+                10,
+                15,
+                22,
+                13,
+                30,
+                17,
+                28,
+                5,
+                24,
+                11,
+                18,
+                19,
+                16,
+                9,
+                20,
+                7,
+                26,
+            ],
+            word_coarseness=4,
+            name="Shuffle",
         )
 
         # Build the round subcipher (rounds 1..40, with shuffle)
@@ -164,21 +282,19 @@ class WARP_CVL:
 
         # S-box on even input words
         node_sbox = warp_round.add_subcipher(
-            sbox_layer,
-            [(warp_round.IN, (2 * i, i)) for i in range(16)]
+            sbox_layer, [(warp_round.IN, (2 * i, i)) for i in range(16)]
         )
 
         # Add round key to S-box outputs
         node_key = warp_round.add_subcipher(
-            key_add,
-            [(node_sbox, (i, i)) for i in range(16)]
+            key_add, [(node_sbox, (i, i)) for i in range(16)]
         )
 
         # XOR with odd input words
         node_xor = warp_round.add_subcipher(
             feistel_xor,
             [(node_key, (i, i)) for i in range(16)]
-            + [(warp_round.IN, (2 * i + 1, i + 16)) for i in range(16)]
+            + [(warp_round.IN, (2 * i + 1, i + 16)) for i in range(16)],
         )
 
         # Combine even words (unchanged) and updated odd words,
@@ -186,18 +302,15 @@ class WARP_CVL:
         node_rc = warp_round.add_subcipher(
             rc_add,
             [(warp_round.IN, (2 * i, 2 * i)) for i in range(16)]
-            + [(node_xor, (i, 2 * i + 1)) for i in range(16)]
+            + [(node_xor, (i, 2 * i + 1)) for i in range(16)],
         )
 
         # Apply shuffle to the full state
         node_shuffle = warp_round.add_subcipher(
-            shuffle,
-            [(node_rc, (i, i)) for i in range(32)]
+            shuffle, [(node_rc, (i, i)) for i in range(32)]
         )
 
-        warp_round.add_output(
-            [(node_shuffle, (i, i)) for i in range(32)]
-        )
+        warp_round.add_output([(node_shuffle, (i, i)) for i in range(32)])
         # --------------------------------------------------------
 
         # Build the final round subcipher (round 41, no shuffle)
@@ -205,30 +318,26 @@ class WARP_CVL:
         warp_final = WordSBoxCipher(4, 32, 32, name="warp_final")
 
         node_sbox_f = warp_final.add_subcipher(
-            sbox_layer,
-            [(warp_final.IN, (2 * i, i)) for i in range(16)]
+            sbox_layer, [(warp_final.IN, (2 * i, i)) for i in range(16)]
         )
 
         node_key_f = warp_final.add_subcipher(
-            key_add,
-            [(node_sbox_f, (i, i)) for i in range(16)]
+            key_add, [(node_sbox_f, (i, i)) for i in range(16)]
         )
 
         node_xor_f = warp_final.add_subcipher(
             feistel_xor,
             [(node_key_f, (i, i)) for i in range(16)]
-            + [(warp_final.IN, (2 * i + 1, i + 16)) for i in range(16)]
+            + [(warp_final.IN, (2 * i + 1, i + 16)) for i in range(16)],
         )
 
         node_rc_f = warp_final.add_subcipher(
             rc_add,
             [(warp_final.IN, (2 * i, 2 * i)) for i in range(16)]
-            + [(node_xor_f, (i, 2 * i + 1)) for i in range(16)]
+            + [(node_xor_f, (i, 2 * i + 1)) for i in range(16)],
         )
 
-        warp_final.add_output(
-            [(node_rc_f, (i, i)) for i in range(32)]
-        )
+        warp_final.add_output([(node_rc_f, (i, i)) for i in range(32)])
         # --------------------------------------------------------
 
         # Assemble the cipher
@@ -239,8 +348,7 @@ class WARP_CVL:
             warp_round.nodes[node_key].const = round_keys[r]
             warp_round.nodes[node_rc].const = rc_consts[r]
             cipher_node = warp_cipher.add_subcipher(
-                warp_round,
-                [(cipher_node, (i, i)) for i in range(32)]
+                warp_round, [(cipher_node, (i, i)) for i in range(32)]
             )
 
         # Final round (always uses K^0 and RC^{41})
@@ -248,13 +356,10 @@ class WARP_CVL:
             warp_final.nodes[node_key_f].const = round_keys[40]
             warp_final.nodes[node_rc_f].const = rc_consts[40]
             cipher_node = warp_cipher.add_subcipher(
-                warp_final,
-                [(cipher_node, (i, i)) for i in range(32)]
+                warp_final, [(cipher_node, (i, i)) for i in range(32)]
             )
 
-        warp_cipher.add_output(
-            [(cipher_node, (i, i)) for i in range(32)]
-        )
+        warp_cipher.add_output([(cipher_node, (i, i)) for i in range(32)])
 
         self.warp_cipher = warp_cipher
 

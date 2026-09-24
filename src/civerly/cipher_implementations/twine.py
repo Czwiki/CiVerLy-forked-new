@@ -5,19 +5,77 @@ from civerly.component import SBox_CVL, PermuteLayer_CVL, RoundkeyXOR_CVL, XOR_C
 
 class TWINE_CVL:
     _SBOX_TABLE = [
-        0xC, 0x0, 0xF, 0xA, 0x2, 0xB, 0x9, 0x5,
-        0x8, 0x3, 0xD, 0x7, 0x1, 0xE, 0x6, 0x4,
+        0xC,
+        0x0,
+        0xF,
+        0xA,
+        0x2,
+        0xB,
+        0x9,
+        0x5,
+        0x8,
+        0x3,
+        0xD,
+        0x7,
+        0x1,
+        0xE,
+        0x6,
+        0x4,
     ]
     _PERMUTATION = [
-        5, 0, 1, 4, 7, 12, 3, 8, 13, 6, 9, 2, 15, 10, 11, 14,
+        5,
+        0,
+        1,
+        4,
+        7,
+        12,
+        3,
+        8,
+        13,
+        6,
+        9,
+        2,
+        15,
+        10,
+        11,
+        14,
     ]
     _ROUND_CONSTANTS = [
-        0x01, 0x02, 0x04, 0x08, 0x10, 0x20,
-        0x03, 0x06, 0x0C, 0x18, 0x30, 0x23,
-        0x05, 0x0A, 0x14, 0x28, 0x13, 0x26,
-        0x0F, 0x1E, 0x3C, 0x3B, 0x35, 0x29,
-        0x11, 0x22, 0x07, 0x0E, 0x1C, 0x38,
-        0x33, 0x25, 0x09, 0x12, 0x24,
+        0x01,
+        0x02,
+        0x04,
+        0x08,
+        0x10,
+        0x20,
+        0x03,
+        0x06,
+        0x0C,
+        0x18,
+        0x30,
+        0x23,
+        0x05,
+        0x0A,
+        0x14,
+        0x28,
+        0x13,
+        0x26,
+        0x0F,
+        0x1E,
+        0x3C,
+        0x3B,
+        0x35,
+        0x29,
+        0x11,
+        0x22,
+        0x07,
+        0x0E,
+        0x1C,
+        0x38,
+        0x33,
+        0x25,
+        0x09,
+        0x12,
+        0x24,
     ]
 
     @staticmethod
@@ -35,8 +93,14 @@ class TWINE_CVL:
         rks = []
         for r in range(1, 36):
             rk = (
-                (WK[1] << 28) | (WK[3] << 24) | (WK[4] << 20) | (WK[6] << 16)
-                | (WK[13] << 12) | (WK[14] << 8) | (WK[15] << 4) | WK[16]
+                (WK[1] << 28)
+                | (WK[3] << 24)
+                | (WK[4] << 20)
+                | (WK[6] << 16)
+                | (WK[13] << 12)
+                | (WK[14] << 8)
+                | (WK[15] << 4)
+                | WK[16]
             )
             rks.append(rk)
             WK[1] = WK[1] ^ TWINE_CVL._SBOX_TABLE[WK[0]]
@@ -47,8 +111,14 @@ class TWINE_CVL:
             WK[0:4] = WK[1:4] + [WK[0]]
             WK[0:20] = WK[4:20] + WK[0:4]
         rk = (
-            (WK[1] << 28) | (WK[3] << 24) | (WK[4] << 20) | (WK[6] << 16)
-            | (WK[13] << 12) | (WK[14] << 8) | (WK[15] << 4) | WK[16]
+            (WK[1] << 28)
+            | (WK[3] << 24)
+            | (WK[4] << 20)
+            | (WK[6] << 16)
+            | (WK[13] << 12)
+            | (WK[14] << 8)
+            | (WK[15] << 4)
+            | WK[16]
         )
         rks.append(rk)
         return rks
@@ -68,8 +138,14 @@ class TWINE_CVL:
         rks = []
         for r in range(1, 36):
             rk = (
-                (WK[2] << 28) | (WK[3] << 24) | (WK[12] << 20) | (WK[15] << 16)
-                | (WK[17] << 12) | (WK[18] << 8) | (WK[28] << 4) | WK[31]
+                (WK[2] << 28)
+                | (WK[3] << 24)
+                | (WK[12] << 20)
+                | (WK[15] << 16)
+                | (WK[17] << 12)
+                | (WK[18] << 8)
+                | (WK[28] << 4)
+                | WK[31]
             )
             rks.append(rk)
             WK[1] = WK[1] ^ TWINE_CVL._SBOX_TABLE[WK[0]]
@@ -81,8 +157,14 @@ class TWINE_CVL:
             WK[0:4] = WK[1:4] + [WK[0]]
             WK[0:32] = WK[4:32] + WK[0:4]
         rk = (
-            (WK[2] << 28) | (WK[3] << 24) | (WK[12] << 20) | (WK[15] << 16)
-            | (WK[17] << 12) | (WK[18] << 8) | (WK[28] << 4) | WK[31]
+            (WK[2] << 28)
+            | (WK[3] << 24)
+            | (WK[12] << 20)
+            | (WK[15] << 16)
+            | (WK[17] << 12)
+            | (WK[18] << 8)
+            | (WK[28] << 4)
+            | WK[31]
         )
         rks.append(rk)
         return rks
@@ -223,17 +305,13 @@ class TWINE_CVL:
             elif key_size == 128:
                 rks = TWINE_CVL._key_schedule_128(key)
             else:
-                raise ValueError(
-                    f"key_size must be 80 or 128, got {key_size}"
-                )
+                raise ValueError(f"key_size must be 80 or 128, got {key_size}")
 
         if rks is None:
             rks = [0 for _ in range(R)]
 
         if len(rks) < R:
-            raise ValueError(
-                f"Need {R} round keys, got {len(rks)}"
-            )
+            raise ValueError(f"Need {R} round keys, got {len(rks)}")
 
         rks = rks[:R]
 
@@ -248,17 +326,13 @@ class TWINE_CVL:
         rk_nodes = []
         for j in range(8):
             rk = RoundkeyXOR_CVL(4, const=0, name=f"rk{j}")
-            node_rk = twine_round.add_subcipher(
-                rk, [(twine_round.IN, (2 * j, 0))]
-            )
+            node_rk = twine_round.add_subcipher(rk, [(twine_round.IN, (2 * j, 0))])
             rk_nodes.append(node_rk)
 
         # S-box layer on the XOR results
         sbox_nodes = []
         for j in range(8):
-            node_s = twine_round.add_subcipher(
-                sbox, [(rk_nodes[j], (0, 0))]
-            )
+            node_s = twine_round.add_subcipher(sbox, [(rk_nodes[j], (0, 0))])
             sbox_nodes.append(node_s)
 
         # XOR with odd-indexed words
@@ -287,9 +361,7 @@ class TWINE_CVL:
             perm_edges.append((xor_nodes[j], (0, 2 * j + 1)))
 
         node_perm = twine_round.add_subcipher(perm, perm_edges)
-        twine_round.add_output(
-            [(node_perm, (i, i)) for i in range(16)]
-        )
+        twine_round.add_output([(node_perm, (i, i)) for i in range(16)])
 
         # ------------------------------------------------------------------
         # Final round template without permutation (used for round R)
@@ -299,16 +371,12 @@ class TWINE_CVL:
         rk_nodes_final = []
         for j in range(8):
             rk = RoundkeyXOR_CVL(4, const=0, name=f"rk_final{j}")
-            node_rk = twine_final.add_subcipher(
-                rk, [(twine_final.IN, (2 * j, 0))]
-            )
+            node_rk = twine_final.add_subcipher(rk, [(twine_final.IN, (2 * j, 0))])
             rk_nodes_final.append(node_rk)
 
         sbox_nodes_final = []
         for j in range(8):
-            node_s = twine_final.add_subcipher(
-                sbox, [(rk_nodes_final[j], (0, 0))]
-            )
+            node_s = twine_final.add_subcipher(sbox, [(rk_nodes_final[j], (0, 0))])
             sbox_nodes_final.append(node_s)
 
         xor_nodes_final = []
@@ -326,9 +394,7 @@ class TWINE_CVL:
         final_output_edges = []
         for j in range(8):
             final_output_edges.append((twine_final.IN, (2 * j, 2 * j)))
-            final_output_edges.append(
-                (xor_nodes_final[j], (0, 2 * j + 1))
-            )
+            final_output_edges.append((xor_nodes_final[j], (0, 2 * j + 1)))
         twine_final.add_output(final_output_edges)
 
         # ------------------------------------------------------------------
@@ -349,9 +415,7 @@ class TWINE_CVL:
         for j in range(8):
             rk_val = (rks[R - 1] >> (28 - 4 * j)) & 0xF
             twine_final.nodes[rk_nodes_final[j]].const = rk_val
-        node = cipher.add_subcipher(
-            twine_final, [(node, (i, i)) for i in range(16)]
-        )
+        node = cipher.add_subcipher(twine_final, [(node, (i, i)) for i in range(16)])
 
         cipher.add_output([(node, (i, i)) for i in range(16)])
         self.cipher = cipher
