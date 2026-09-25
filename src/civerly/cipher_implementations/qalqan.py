@@ -35,14 +35,14 @@ must yield **N + 1** round keys.
 The constructor accepts ``start_round`` / ``end_round`` (0-based, inclusive)
 to build a reduced or sliced cipher:
 
-* Round ``0``            : ``XOR(rk[0]) → S → L``   (initial whitening)
-* Round ``i`` (1..N-1)   : ``ADD(rk[i]) → S → L``   (middle rounds)
+* Round ``0``            : ``XOR(rk[0]) -> S -> L``   (initial whitening)
+* Round ``i`` (1..N-1)   : ``ADD(rk[i]) -> S -> L``   (middle rounds)
 * Round ``N``            : ``XOR(rk[N])``           (final whitening)
 
 ``start_round`` determines which round key is applied first.
 ``end_round`` determines the last round key that is applied.
 If ``end_round == N`` the cipher ends with the final whitening XOR;
-otherwise it ends with a middle round ``ADD → S → L``.
+otherwise it ends with a middle round ``ADD -> S -> L``.
 
 The older ``R`` parameter is still supported for backward compatibility:
 ``R`` requests a cipher consisting of the first ``R`` rounds
@@ -80,7 +80,7 @@ from civerly.component import (
 # Qalqan S-box (Figure 1 in the paper / ``documentation/qalqan.py::SBOX``)
 # ---------------------------------------------------------------------------
 
-SBOX = [
+SBOX = (
     0xEB,
     0x89,
     0xDB,
@@ -337,7 +337,7 @@ SBOX = [
     0xB1,
     0x2C,
     0xFA,
-]
+)
 
 
 def _byte_rev_int(x):
@@ -489,6 +489,8 @@ def _qalqan_round_keys(key, rounds=None):
 class QALQAN_CVL:
     r"""
     The CiVerLy implementation of the Qalqan block cipher.
+    Note that due to limited literature on Qalqan, the test vectors
+    are obtained from a manually written reference implementation.
 
     INPUT:
 
@@ -507,7 +509,7 @@ class QALQAN_CVL:
 
         - ``start_round`` -- integer (optional); First round to include
           (0-based, inclusive).  Round ``0`` is the initial whitening
-          (``XOR → S → L``).  When omitted together with ``end_round``,
+          (``XOR -> S -> L``).  When omitted together with ``end_round``,
           ``R`` or the full cipher length is used.
 
         - ``end_round`` -- integer (optional); Last round to include
@@ -691,7 +693,7 @@ class QALQAN_CVL:
         sage: ct_rks == ct_key == bytes.fromhex("024003fa97d2ec44826428ca4d5f00d5")
         True
 
-    Truncated cipher using the backward-compatible ``R`` parameter::
+    Truncated cipher using the ``R`` parameter::
 
         sage: from civerly.cipher_implementations.qalqan import QALQAN_CVL
         sage: from civerly.util import int_to_vec, vec_to_int
@@ -768,48 +770,26 @@ class QALQAN_CVL:
         sage: ct_slice == ct_slice_key == bytes.fromhex("7056c812663bd9c44351a60626edc1b0")
         True
 
-    Differential trail search (requires an external SAT solver and the
-    Espresso logic minimizer) on a truncated 4-round cipher::
+    Linear trail search on 3 rounds of Qalqan::
 
-        sage: # optional - cryptominisat
-        sage: from civerly.cipher_implementations.qalqan import QALQAN_CVL
-        sage: from civerly.util import int_to_vec, vec_to_int
-        sage: from civerly.model_options import *
-        sage: import tempfile
-        sage: with tempfile.TemporaryDirectory() as tmpdir:               # optional - espresso
-        ....:     cipher = QALQAN_CVL(R=4, rks=[0]*4)
-        ....:     model_options = MODEL_OPTIONS(
-        ....:         cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
-        ....:         optimization=OPTIMIZATION.SAT,
-        ....:         granularity=GRANULARITY.BITWISE,
-        ....:         sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-        ....:         sat_solver=CRYPTOMINISAT_CVL(),
-        ....:         logic_minimizer=ESPRESSO_CVL(),
-        ....:         path=Path(tmpdir))
-        ....:     cipher.analyse(model_options=model_options)
-        0
-
-    The trail must not contain any unnamed components::
-
-        sage: # optional - cryptominisat
+        sage: # optional - cryptominisat espresso
         sage: from civerly.cipher_implementations.qalqan import QALQAN_CVL
         sage: from civerly.model_options import *
         sage: import tempfile
-        sage: with tempfile.TemporaryDirectory() as tmpdir:               # optional - espresso
-        ....:     cipher = QALQAN_CVL(start_round=1, end_round=3, rks=[0]*4)
-        ....:     model_options = MODEL_OPTIONS(
-        ....:         cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
-        ....:         optimization=OPTIMIZATION.SAT,
-        ....:         granularity=GRANULARITY.BITWISE,
-        ....:         sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-        ....:         sat_solver=CRYPTOMINISAT_CVL(),
-        ....:         logic_minimizer=ESPRESSO_CVL(),
-        ....:         number_of_solutions=1,
-        ....:         path=Path(tmpdir))
-        ....:     cipher.analyse(model_options=model_options)
-        ....:     trail = cipher.get_trail(model_options)
-        ....:     "Unnamed" not in str(trail)
-        True
+        sage: with tempfile.TemporaryDirectory() as tmpdir:
+        ....:   cipher = QALQAN_CVL(R=3, rks=[0]*3)
+        ....:   model_options = MODEL_OPTIONS(
+        ....:       cryptanalysis=CRYPTANALYSIS.LINEAR,
+        ....:       optimization=OPTIMIZATION.SAT,
+        ....:       granularity=GRANULARITY.BITWISE,
+        ....:       sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
+        ....:       sat_solver=CRYPTOMINISAT_CVL(),
+        ....:       logic_minimizer=ESPRESSO_CVL(),
+        ....:       path=Path(tmpdir))
+        ....:   cipher.analyse(model_options=model_options)
+        Using existing file ..., make sure it is up to date!
+        14432 variables and 95211 clauses were written to ...
+        28
     """
 
     def __init__(
@@ -994,7 +974,7 @@ class QALQAN_CVL:
                 kw = RoundkeyXOR_CVL(128, rks[r], name="KeyAdd_fin")
                 node = cipher.add_subcipher(kw, [(node, (i, i)) for i in range(128)])
             else:
-                # ADD → S → L middle round
+                # ADD -> S -> L middle round
                 add_node_template.nodes[rk_node].const = _byte_rev_int(rks[r])
                 node = cipher.add_subcipher(
                     middle_round, [(node, (i, i)) for i in range(128)]

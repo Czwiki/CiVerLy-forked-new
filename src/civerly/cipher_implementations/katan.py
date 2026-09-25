@@ -234,7 +234,7 @@ class KATAN_CVL:
 
     SAT modeling does not require external minimizers for KATAN's tiny
     S-boxes, because the ``LOGICAL_COND`` encoding enumerates all possible
-    transitions directly. This allows us to reproduce the 71-round differential 
+    transitions directly. This allows us to reproduce the 71-round differential
     trail with weight 30 from https://eprint.iacr.org/2012/401::
 
         sage: from civerly.cipher_implementations.katan import KATAN_CVL
