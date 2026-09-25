@@ -422,8 +422,8 @@ def serpent_key_schedule(master_key, keylen=128, R=32):
     # i=0: S3, i=1: S2, i=2: S1, i=3: S0, i=4: S7, ...
     k = [0] * 132
     for i in range(33):
-        whichS = (32 + 3 - i) % 32
-        sbox = SERPENT_SBOXES[whichS % 8]
+        which_S = (32 + 3 - i) % 32
+        sbox = SERPENT_SBOXES[which_S % 8]
         for j in range(32):
             nibble = 0
             for c in range(4):

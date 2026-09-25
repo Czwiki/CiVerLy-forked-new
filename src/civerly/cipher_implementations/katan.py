@@ -1,9 +1,7 @@
 """
 KATAN implementation for CiVerLy.
 
-Reference implementation and attribution:
-- Original C reference by Orr Dunkelman: http://www.cs.technion.ac.il/~orrd/KATAN/katan.c
-- Public gist fork used for verification: https://gist.github.com/raullenchai/2712516
+Reference implementation and attribution: https://gist.github.com/raullenchai/2712516
 
 This Python/Sage implementation was validated against the C reference
 included in documentation/reference_implementation_katan.c. Consult the
