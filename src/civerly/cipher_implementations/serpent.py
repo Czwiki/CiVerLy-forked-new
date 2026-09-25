@@ -38,7 +38,7 @@ PHI = 0x9E3779B9
 # ---------------------------------------------------------------------------
 # IP / FP tables from the Serpent specification
 # ---------------------------------------------------------------------------
-IP_TABLE = [
+IP_TABLE = (
     0,
     32,
     64,
@@ -167,9 +167,9 @@ IP_TABLE = [
     63,
     95,
     127,
-]
+)
 
-FP_TABLE = [
+FP_TABLE = (
     0,
     4,
     8,
@@ -298,7 +298,7 @@ FP_TABLE = [
     119,
     123,
     127,
-]
+)
 
 
 # ---------------------------------------------------------------------------
@@ -479,8 +479,7 @@ def _build_serpent_linear_layer():
     TESTS::
 
         sage: from civerly.cipher_implementations.serpent import _build_serpent_linear_layer
-        sage: lt = _build_serpent_linear_layer()
-        sage: lt  # returns LinearLayer_CVL
+        sage: _build_serpent_linear_layer() # returns LinearLayer_CVL
         LT
 
     """
@@ -666,8 +665,9 @@ class SERPENT_CVL:
 
     EXAMPLES::
 
-        Verify encryption with the NESSIE test vectors (KEYSIZE=128,
-        KEY=0) from ``ecb_tbl_precomputed.txt``::
+        Verify encryption with the NESSIE test vectors
+        (see https://biham.cs.technion.ac.il/Reports/Serpent/)
+        with KEYSIZE=128, KEY=0 from ``ecb_tbl_precomputed.txt``::
 
             sage: from civerly.cipher_implementations.serpent import SERPENT_CVL
             sage: from civerly.util import int_to_vec, vec_to_int
@@ -689,10 +689,10 @@ class SERPENT_CVL:
             sage: vec_to_int(result) > 0
             True
 
-        Construct an exact slice of the cipher (rounds 4--10).  In this
-        mode the internal data path is preserved: IP and FP are omitted
-        because they lie outside the chosen range, and every selected round
-        keeps its linear transformation (only the true final round, 31,
+        Construct a sliced version of the cipher (rounds 4-10).
+        In this mode the internal data path is preserved: IP and FP are
+        omitted because they lie outside the chosen range, and every selected
+        round keeps its linear transformation (only the true final round, 31,
         would receive an extra key XOR instead).::
 
             sage: serpent = SERPENT_CVL(master_key=0, keylen=128, start=4, end=10)
@@ -736,25 +736,28 @@ class SERPENT_CVL:
             ...
             ValueError: master_key and rks are mutually exclusive
 
-        Model the cipher with MILP::
+        Model the cipher with SAT::
 
+            sage: # optional - cadical espresso
             sage: from civerly.cipher_implementations.serpent import SERPENT_CVL
             sage: from civerly.model_options import *
             sage: import tempfile
-            sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - scip
-            ....:   serpent = SERPENT_CVL(R=4)
+            sage: with tempfile.TemporaryDirectory() as tmpdir:
+            ....:   serpent = SERPENT_CVL(R=3)
             ....:   model_options = MODEL_OPTIONS(
             ....:       cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
-            ....:       optimization=OPTIMIZATION.MILP,
+            ....:       optimization=OPTIMIZATION.SAT,
             ....:       granularity=GRANULARITY.BITWISE,
-            ....:       sbox_modeling=SBOX_MODELING.CONVEX_HULL,
+            ....:       sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
             ....:       linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
-            ....:       milp_solver=SCIP_CVL(),
+            ....:       sat_solver=CADICAL_CVL(),
+            ....:       logic_minimizer=ESPRESSO_CVL(),
             ....:       path=Path(tmpdir))
             ....:   serpent.analyse(model_options)
             ....:   trail = str(serpent.get_trail(model_options))
             ....:   assert "Unnamed Component" not in trail
-
+            6884 variables and 19953 clauses were written to ...
+            19
     """
 
     def __init__(
