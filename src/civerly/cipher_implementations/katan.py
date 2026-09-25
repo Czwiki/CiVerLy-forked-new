@@ -234,23 +234,26 @@ class KATAN_CVL:
 
     SAT modeling does not require external minimizers for KATAN's tiny
     S-boxes, because the ``LOGICAL_COND`` encoding enumerates all possible
-    transitions directly::
+    transitions directly. This allows us to reproduce the 71-round differential 
+    trail with weight 30 from https://eprint.iacr.org/2012/401::
 
         sage: from civerly.cipher_implementations.katan import KATAN_CVL
         sage: from civerly.model_options import *
         sage: from civerly.util import suppress_output
         sage: import tempfile
         sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - cryptominisat
-        ....:   c = KATAN_CVL(variant=32, R=15, key=0)
+        ....:   c = KATAN_CVL(variant=32, R=71, key=0)
         ....:   model_options = MODEL_OPTIONS(
         ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
         ....:     optimization=OPTIMIZATION.SAT,
         ....:     granularity=GRANULARITY.BITWISE,
-        ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND,
+        ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
+        ....:     logic_minimizer=ESPRESSO_CVL(),
         ....:     sat_solver=CRYPTOMINISAT_CVL(),
         ....:     path=Path(tmpdir))
         ....:   c.analyse(model_options)
-        2
+        1399 variables and 3293 clauses were written to ...
+        30
 
     Bitwise MILP modeling is also supported.  The following example is tagged
     as optional because it requires an external MILP solver::
@@ -269,11 +272,10 @@ class KATAN_CVL:
         ....:     sbox_modeling=SBOX_MODELING.CONVEX_HULL,
         ....:     milp_solver=SCIP_CVL(),
         ....:     path=Path(tmpdir))
-        ....:   with suppress_output():
-        ....:     bound = c.analyse(model_options)
-        ....:   print(bound)
+        ....:   c.analyse(model_options)
         ....:   trail = c.get_trail(model_options)
         ....:   "Unnamed Component" not in str(trail)
+        447 variables and 636 constraints were written to ...
         2
         True
     """
