@@ -50,28 +50,6 @@ def _build_sbox_layer():
     return sboxlayer
 
 
-def _build_p_permutation():
-    r"""
-    Build the LBlock diffusion permutation ``P``.
-
-    ``P`` operates on eight 4-bit words:
-
-    .. MATH::
-
-        U_7 = Z_6,\; U_6 = Z_4,\; U_5 = Z_7,\; U_4 = Z_5,\\
-        U_3 = Z_2,\; U_2 = Z_0,\; U_1 = Z_3,\; U_0 = Z_1.
-
-    In ``PermuteLayer_CVL`` notation ``perm[i]`` is the *destination*
-    word of input word ``i``, therefore the resulting permutation list is
-    ``[2, 0, 3, 1, 6, 4, 7, 5]`` with ``word_coarseness=4``.
-    """
-    return PermuteLayer_CVL(
-        [2, 0, 3, 1, 6, 4, 7, 5],
-        word_coarseness=4,
-        name="P",
-    )
-
-
 def lblock_key_schedule(key, rounds=32):
     r"""
     Generate the 32-bit round keys for LBlock from an 80-bit master key.
@@ -142,7 +120,7 @@ class LBLOCK_CVL:
 
         EXAMPLES:
 
-        Test vectors from the LBlock specification::
+        Test vectors from the LBlock specification (https://eprint.iacr.org/2011/345, App. I)::
 
             sage: from civerly.cipher_implementations.lblock \
             ....:   import LBLOCK_CVL, lblock_key_schedule
@@ -156,13 +134,13 @@ class LBLOCK_CVL:
             sage: hex(vec_to_int(cipher(int_to_vec(0x0123456789abcdef, 64))))
             '0x4b7179d8ebee0c26'
 
-        Model the cipher with SAT::
+        Model the cipher with SAT (verifying https://eprint.iacr.org/2011/345, Table 2)::
 
             sage: from civerly.cipher_implementations.lblock \
             ....:   import LBLOCK_CVL
             sage: from civerly.model_options import *
             sage: import tempfile
-            sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - cryptominisat  # optional - espresso
+            sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - cryptominisat espresso
             ....:   cipher = LBLOCK_CVL(R=4)
             ....:   model_options = MODEL_OPTIONS(
             ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
@@ -177,12 +155,10 @@ class LBLOCK_CVL:
             ....:   cipher.analyse(model_options)
             ....:   trail = str(cipher.get_trail(model_options))
             ....:   assert "Unnamed Component" not in trail
-            1984 variables and 6865 clauses were written to '...'
-            [  0 , 10] (trying w =   5) : SAT
-            [  0 ,  5] (trying w =   2) : UNSAT
-            [  3 ,  5] (trying w =   4) : SAT
-            [  3 ,  4] (trying w =   3) : UNSAT
-            4
+            Using existing file ...
+            Using existing file ...
+            4320 variables and 9617 clauses were written to ...
+            6
 
         Model the cipher with MILP::
 
@@ -200,9 +176,8 @@ class LBLOCK_CVL:
             ....:     milp_solver=SCIP_CVL(),
             ....:     path=Path(tmpdir))
             ....:   cipher.analyse(model_options)
-            2752 variables and 3089 constraints were written to '...'
-            4
-
+            4320 variables and 5089 constraints were written to ...
+            6
         """
         if rks is None:
             rks = [0x0 for _ in range(R)]
@@ -211,7 +186,7 @@ class LBLOCK_CVL:
 
         # Reusable layers
         sboxlayer = _build_sbox_layer()
-        p_perm = _build_p_permutation()
+        p_perm = PermuteLayer_CVL([2, 0, 3, 1, 6, 4, 7, 5], word_coarseness=4, name="P")
         rot = RotateLayer_CVL(32, 8, word_coarseness=1, name="rot")
         xor = XOR_CVL(32, name="xor")
         rk = RoundkeyXOR_CVL(32, 0x0, name="rk")
