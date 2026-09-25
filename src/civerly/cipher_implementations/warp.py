@@ -49,21 +49,23 @@ class WARP_CVL:
 
         Model the cipher with MILP (bitwise)::
 
+            sage: # optional - scip espresso
             sage: from civerly.cipher_implementations.warp import WARP_CVL
             sage: from civerly.model_options import *
             sage: import tempfile
-            sage: warp = WARP_CVL(key=0x0)
-            sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - scip
+            sage: warp = WARP_CVL(R=4, key=0x0)
+            sage: with tempfile.TemporaryDirectory() as tmpdir:
             ....:   model_options = MODEL_OPTIONS(
             ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
             ....:     optimization=OPTIMIZATION.MILP,
             ....:     granularity=GRANULARITY.BITWISE,
-            ....:     sbox_modeling=SBOX_MODELING.CONVEX_HULL,
+            ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
             ....:     milp_solver=SCIP_CVL(),
+            ....:     logic_minimizer=ESPRESSO_CVL(),
             ....:     path=Path(tmpdir))
             ....:   warp.analyse(model_options)
-            5248 variables and 5777 constraints were written to '...'
-            41
+            9408 variables and 13249 constraints were written to ...
+            6
 
         Model the cipher with SAT::
 
@@ -71,7 +73,7 @@ class WARP_CVL:
             sage: from civerly.model_options import *
             sage: import tempfile
             sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - cryptominisat  # optional - espresso
-            ....:   warp = WARP_CVL(key=0x0)
+            ....:   warp = WARP_CVL(R=8, key=0x0)
             ....:   model_options = MODEL_OPTIONS(
             ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
             ....:     optimization=OPTIMIZATION.SAT,
@@ -84,15 +86,8 @@ class WARP_CVL:
             ....:   warp.analyse(model_options)
             ....:   trail = str(warp.get_trail(model_options))
             ....:   assert "Unnamed Component" not in trail
-            5248 variables and 13441 clauses were written to '...'
-            [  0 ,100] (trying w =  50) : SAT
-            [  0 , 50] (trying w =  25) : SAT
-            [  0 , 25] (trying w =  12) : SAT
-            [  0 , 12] (trying w =   6) : UNSAT
-            [  7 , 12] (trying w =   9) : SAT
-            [  7 ,  9] (trying w =   8) : SAT
-            [  7 ,  8] (trying w =   7) : UNSAT
-            8
+            18048 variables and 42369 clauses were written to ...
+            22
         """
         if name is None:
             name = "WARP"
