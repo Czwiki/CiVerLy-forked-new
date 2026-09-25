@@ -777,7 +777,7 @@ class QALQAN_CVL:
         sage: from civerly.model_options import *
         sage: import tempfile
         sage: with tempfile.TemporaryDirectory() as tmpdir:
-        ....:   cipher = QALQAN_CVL(R=3, rks=[0]*3)
+        ....:   cipher = QALQAN_CVL(R=3, rks=[0]*4)
         ....:   model_options = MODEL_OPTIONS(
         ....:       cryptanalysis=CRYPTANALYSIS.LINEAR,
         ....:       optimization=OPTIMIZATION.SAT,
@@ -821,8 +821,9 @@ class QALQAN_CVL:
                 raise ValueError("end_round must be >= start_round.")
         elif R is not None:
             R = int(R)
+            assert full_rounds == R, "R doesn't match to length of rks."
             start_round = 0
-            end_round = full_rounds if full_rounds == R else R - 1
+            end_round = full_rounds
         else:
             start_round = 0
             end_round = full_rounds
