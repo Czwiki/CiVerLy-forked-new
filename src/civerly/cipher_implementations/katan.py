@@ -12,7 +12,7 @@ original sources for licensing and full attribution.
 
 from sage.crypto.sbox import SBox
 
-from civerly.component import I_CVL, SBox_CVL
+from civerly.component import SBox_CVL
 from civerly.sboxcipher import SBoxCipher
 
 PARAMS = {
@@ -112,84 +112,6 @@ def _fb_sbox(key_bit):
     return SBox(table)
 
 
-def _register_bit_index(l1_len, l2_len, register, bit_position):
-    if register == "l1":
-        return l1_len - 1 - bit_position
-    if register == "l2":
-        return l1_len + l2_len - 1 - bit_position
-    raise ValueError("Unknown register")
-
-
-def _build_step_cipher(l1_len, l2_len, fa_bits, fb_bits, ir_bit, ka, kb, name):
-    step = SBoxCipher(l1_len + l2_len, l1_len + l2_len, name=name)
-
-    fa = SBox_CVL(_fa_sbox(ir_bit, ka), name=f"{name}-fa")
-    fb = SBox_CVL(_fb_sbox(kb), name=f"{name}-fb")
-
-    fa_edges = [
-        (step.IN, (_register_bit_index(l1_len, l2_len, "l1", bit), i))
-        for i, bit in enumerate(fa_bits)
-    ]
-    fb_edges = [
-        (step.IN, (_register_bit_index(l1_len, l2_len, "l2", bit), i))
-        for i, bit in enumerate(fb_bits)
-    ]
-
-    fa_node = step.add_subcipher(fa, fa_edges)
-    fb_node = step.add_subcipher(fb, fb_edges)
-
-    for bit in range(1, l1_len):
-        route = I_CVL(1, name=f"{name}-l1-{bit}")
-        node = step.add_subcipher(
-            route,
-            [(step.IN, (_register_bit_index(l1_len, l2_len, "l1", bit - 1), 0))],
-        )
-        step.add_output([(node, (0, _register_bit_index(l1_len, l2_len, "l1", bit)))])
-
-    for bit in range(1, l2_len):
-        route = I_CVL(1, name=f"{name}-l2-{bit}")
-        node = step.add_subcipher(
-            route,
-            [(step.IN, (_register_bit_index(l1_len, l2_len, "l2", bit - 1), 0))],
-        )
-        step.add_output([(node, (0, _register_bit_index(l1_len, l2_len, "l2", bit)))])
-
-    step.add_output([(fa_node, (0, _register_bit_index(l1_len, l2_len, "l2", 0)))])
-    step.add_output([(fb_node, (0, _register_bit_index(l1_len, l2_len, "l1", 0)))])
-    return step
-
-
-def _build_round_cipher(variant, round_index, ka, kb, ir_bit):
-    params = PARAMS[variant]
-    l1_len = params["l1"]
-    l2_len = params["l2"]
-    fa_bits = params["fa"]
-    fb_bits = params["fb"]
-    steps = params["steps"]
-
-    round_cipher = SBoxCipher(
-        l1_len + l2_len, l1_len + l2_len, name=f"KATAN{variant}-r{round_index}"
-    )
-    node = round_cipher.IN
-    for step_idx in range(steps):
-        step = _build_step_cipher(
-            l1_len,
-            l2_len,
-            fa_bits,
-            fb_bits,
-            ir_bit,
-            ka,
-            kb,
-            name=f"KATAN{variant}-r{round_index}-s{step_idx}",
-        )
-        node = round_cipher.add_subcipher(
-            step,
-            [(node, (i, i)) for i in range(l1_len + l2_len)],
-        )
-    round_cipher.add_output([(node, (i, i)) for i in range(l1_len + l2_len)])
-    return round_cipher
-
-
 def reference_katan_encrypt(variant, plaintext_int, key_int, rounds):
     r"""Reference Python implementation mirroring the C reference.
 
@@ -200,23 +122,17 @@ def reference_katan_encrypt(variant, plaintext_int, key_int, rounds):
     l2 = params["l2"]
     fa_pos = params["fa"]
     fb_pos = params["fb"]
-    steps = params["steps"]
 
     # initialize L1 and L2 as lists of bits, index 0 = least significant
-    (1 << l2) - 1
     L2 = [(plaintext_int >> i) & 1 for i in range(l2)]
     L1 = [((plaintext_int >> (l2 + i)) & 1) for i in range(l1)]
 
-    # key bits
-    k = [(int(key_int) >> i) & 1 for i in range(80)]
-    for i in range(80, 2 * rounds):
-        k.append(k[i - 80] ^ k[i - 61] ^ k[i - 50] ^ k[i - 13])
-
-    # IR stream
+    k = _key_bits(key_int, rounds)
     ir = _ir_bits(rounds)
 
     for r in range(rounds):
-        if steps == 1:
+        # all steps of a round use the same key and IR bits
+        for _ in range(params["steps"]):
             fa = (
                 L1[fa_pos[0]]
                 ^ L1[fa_pos[1]]
@@ -235,89 +151,6 @@ def reference_katan_encrypt(variant, plaintext_int, key_int, rounds):
             # shift left (towards higher index), dropping MSB (last element)
             L1 = [fb, *L1[:-1]]
             L2 = [fa, *L2[:-1]]
-
-        elif steps == 2:
-            fa_1 = (
-                L1[fa_pos[0]]
-                ^ L1[fa_pos[1]]
-                ^ (L1[fa_pos[2]] & L1[fa_pos[3]])
-                ^ (L1[fa_pos[4]] & ir[r])
-                ^ k[2 * r]
-            )
-            fa_0 = (
-                L1[fa_pos[0] - 1]
-                ^ L1[fa_pos[1] - 1]
-                ^ (L1[fa_pos[2] - 1] & L1[fa_pos[3] - 1])
-                ^ (L1[fa_pos[4] - 1] & ir[r])
-                ^ k[2 * r]
-            )
-            fb_1 = (
-                L2[fb_pos[0]]
-                ^ L2[fb_pos[1]]
-                ^ (L2[fb_pos[2]] & L2[fb_pos[3]])
-                ^ (L2[fb_pos[4]] & L2[fb_pos[5]])
-                ^ k[2 * r + 1]
-            )
-            fb_0 = (
-                L2[fb_pos[0] - 1]
-                ^ L2[fb_pos[1] - 1]
-                ^ (L2[fb_pos[2] - 1] & L2[fb_pos[3] - 1])
-                ^ (L2[fb_pos[4] - 1] & L2[fb_pos[5] - 1])
-                ^ k[2 * r + 1]
-            )
-
-            L1 = [fb_0, fb_1, *L1[:-2]]
-            L2 = [fa_0, fa_1, *L2[:-2]]
-
-        elif steps == 3:
-            fa_2 = (
-                L1[fa_pos[0]]
-                ^ L1[fa_pos[1]]
-                ^ (L1[fa_pos[2]] & L1[fa_pos[3]])
-                ^ (L1[fa_pos[4]] & ir[r])
-                ^ k[2 * r]
-            )
-            fa_1 = (
-                L1[fa_pos[0] - 1]
-                ^ L1[fa_pos[1] - 1]
-                ^ (L1[fa_pos[2] - 1] & L1[fa_pos[3] - 1])
-                ^ (L1[fa_pos[4] - 1] & ir[r])
-                ^ k[2 * r]
-            )
-            fa_0 = (
-                L1[fa_pos[0] - 2]
-                ^ L1[fa_pos[1] - 2]
-                ^ (L1[fa_pos[2] - 2] & L1[fa_pos[3] - 2])
-                ^ (L1[fa_pos[4] - 2] & ir[r])
-                ^ k[2 * r]
-            )
-            fb_2 = (
-                L2[fb_pos[0]]
-                ^ L2[fb_pos[1]]
-                ^ (L2[fb_pos[2]] & L2[fb_pos[3]])
-                ^ (L2[fb_pos[4]] & L2[fb_pos[5]])
-                ^ k[2 * r + 1]
-            )
-            fb_1 = (
-                L2[fb_pos[0] - 1]
-                ^ L2[fb_pos[1] - 1]
-                ^ (L2[fb_pos[2] - 1] & L2[fb_pos[3] - 1])
-                ^ (L2[fb_pos[4] - 1] & L2[fb_pos[5] - 1])
-                ^ k[2 * r + 1]
-            )
-            fb_0 = (
-                L2[fb_pos[0] - 2]
-                ^ L2[fb_pos[1] - 2]
-                ^ (L2[fb_pos[2] - 2] & L2[fb_pos[3] - 2])
-                ^ (L2[fb_pos[4] - 2] & L2[fb_pos[5] - 2])
-                ^ k[2 * r + 1]
-            )
-
-            L1 = [fb_0, fb_1, fb_2, *L1[:-3]]
-            L2 = [fa_0, fa_1, fa_2, *L2[:-3]]
-
-        else:
-            raise ValueError("Unsupported steps")
 
     # recombine
     out = 0
@@ -397,7 +230,7 @@ class KATAN_CVL:
             ...
         ValueError: start must be provided when end is given
 
-    MODELING:
+    TESTS::
 
     SAT modeling does not require external minimizers for KATAN's tiny
     S-boxes, because the ``LOGICAL_COND`` encoding enumerates all possible
@@ -407,17 +240,17 @@ class KATAN_CVL:
         sage: from civerly.model_options import *
         sage: from civerly.util import suppress_output
         sage: import tempfile
-        sage: with tempfile.TemporaryDirectory() as tmpdir:
-        ....:   c = KATAN_CVL(variant=32, R=3, key=0)
+        sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - cryptominisat
+        ....:   c = KATAN_CVL(variant=32, R=15, key=0)
         ....:   model_options = MODEL_OPTIONS(
         ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
         ....:     optimization=OPTIMIZATION.SAT,
         ....:     granularity=GRANULARITY.BITWISE,
         ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND,
+        ....:     sat_solver=CRYPTOMINISAT_CVL(),
         ....:     path=Path(tmpdir))
-        ....:   with suppress_output(): sat = c.model(model_options)
-        ....:   sat.nvars() > 0
-        True
+        ....:   c.analyse(model_options)
+        2
 
     Bitwise MILP modeling is also supported.  The following example is tagged
     as optional because it requires an external MILP solver::
@@ -428,7 +261,7 @@ class KATAN_CVL:
         sage: from civerly.util import suppress_output
         sage: import tempfile
         sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - scip
-        ....:   c = KATAN_CVL(variant=32, R=3, key=0)
+        ....:   c = KATAN_CVL(variant=32, R=15, key=0)
         ....:   model_options = MODEL_OPTIONS(
         ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
         ....:     optimization=OPTIMIZATION.MILP,
@@ -436,9 +269,12 @@ class KATAN_CVL:
         ....:     sbox_modeling=SBOX_MODELING.CONVEX_HULL,
         ....:     milp_solver=SCIP_CVL(),
         ....:     path=Path(tmpdir))
-        ....:   with suppress_output(): c.analyse(model_options)
+        ....:   with suppress_output():
+        ....:     bound = c.analyse(model_options)
+        ....:   print(bound)
         ....:   trail = c.get_trail(model_options)
         ....:   "Unnamed Component" not in str(trail)
+        2
         True
     """
 
@@ -486,12 +322,7 @@ class KATAN_CVL:
             else:
                 name = f"KATAN{variant}"
 
-        if start is None:
-            total_rounds = R
-            round_offset = 0
-        else:
-            total_rounds = end - start + 1
-            round_offset = start - 1
+        rounds = range(R) if start is None else range(start - 1, end)
 
         # The key schedule and IR stream are defined over the full execution
         # up to ``end`` (round indices are 1-based externally), so derive the
@@ -502,24 +333,37 @@ class KATAN_CVL:
         ir_stream = _ir_bits(stream_end)
 
         cipher = SBoxCipher(block_size, block_size, name=name)
-        node = cipher.IN
-        for round_index in range(total_rounds):
-            global_index = round_offset + round_index
-            ka = key_stream[2 * global_index]
-            kb = key_stream[2 * global_index + 1]
-            round_cipher = _build_round_cipher(
-                variant,
-                global_index,
-                ka,
-                kb,
-                ir_stream[global_index],
-            )
-            node = cipher.add_subcipher(
-                round_cipher,
-                [(node, (i, i)) for i in range(block_size)],
-            )
 
-        cipher.add_output([(node, (i, i)) for i in range(block_size)])
+        # Each register is tracked as a list of ``(node, bit)`` sources indexed
+        # by register bit position (0 = least significant). Shifting a register
+        # is then a mere relabelling, so each step only adds the ``fa`` and
+        # ``fb`` S-boxes to the graph. In the state vector, bit 0 is the most
+        # significant bit of L1, followed by L1's lower bits and then L2.
+        L1 = [(cipher.IN, l1_len - 1 - i) for i in range(l1_len)]
+        L2 = [(cipher.IN, block_size - 1 - i) for i in range(l2_len)]
+
+        for r in rounds:
+            # all steps of a round use the same key and IR bits
+            fa_sbox = _fa_sbox(ir_stream[r], key_stream[2 * r])
+            fb_sbox = _fb_sbox(key_stream[2 * r + 1])
+            for s in range(params["steps"]):
+                prefix = f"KATAN{variant}-r{r}-s{s}"
+                fa = cipher.add_subcipher(
+                    SBox_CVL(fa_sbox, name=f"{prefix}-fa"),
+                    [(L1[p][0], (L1[p][1], i)) for i, p in enumerate(params["fa"])],
+                )
+                fb = cipher.add_subcipher(
+                    SBox_CVL(fb_sbox, name=f"{prefix}-fb"),
+                    [(L2[p][0], (L2[p][1], i)) for i, p in enumerate(params["fb"])],
+                )
+                # shift towards the MSB, dropping it
+                L1 = [(fb, 0), *L1[:-1]]
+                L2 = [(fa, 0), *L2[:-1]]
+
+        cipher.add_output(
+            [(node, (bit, l1_len - 1 - i)) for i, (node, bit) in enumerate(L1)]
+            + [(node, (bit, block_size - 1 - i)) for i, (node, bit) in enumerate(L2)]
+        )
         self.cipher = cipher
 
     def __new__(cls, *args, **kwargs):
