@@ -202,7 +202,8 @@ class TWINE_CVL:
         EXAMPLES:
 
         Encrypt with a 80-bit master key (test vector from the TWINE
-        specification)::
+        specification, https://www.nec.com/en/global/rd/tg/code/symenc/pdf/twine_LC11.pdf,
+        App. B)::
 
             sage: from civerly.cipher_implementations.twine import TWINE_CVL
             sage: from civerly.util import int_to_vec, vec_to_int
@@ -233,30 +234,36 @@ class TWINE_CVL:
             sage: hex(vec_to_int(cipher(pt)))
             '0x7c1f0f80b1df9c28'
 
-        Model the cipher with MILP (bitwise)::
+        Model the cipher with MILP, reproducing
+        https://www.nec.com/en/global/rd/tg/code/symenc/pdf/twine_LC11.pdf,
+        Table 5 (4 rounds has 3 active SBoxes, each with optimal prob 2^{-2})::
 
+            sage: # optional - scip espresso
             sage: from civerly.cipher_implementations.twine import TWINE_CVL
             sage: from civerly.model_options import *
             sage: import tempfile
             sage: cipher = TWINE_CVL(R=4, name="TWINE-4")
-            sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - scip
+            sage: with tempfile.TemporaryDirectory() as tmpdir:
             ....:   model_options = MODEL_OPTIONS(
             ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
             ....:     optimization=OPTIMIZATION.MILP,
             ....:     granularity=GRANULARITY.BITWISE,
-            ....:     sbox_modeling=SBOX_MODELING.CONVEX_HULL,
+            ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
             ....:     milp_solver=SCIP_CVL(),
+            ....:     logic_minimizer=ESPRESSO_CVL(),
             ....:     path=Path(tmpdir))
             ....:   cipher.analyse(model_options)
-            6336 variables and 7137 constraints were written to '...'
-            24
+            Using existing file ..., make sure it is up to date!
+            3296 variables and 5729 constraints were written to ...
+            6
 
         Model the cipher with SAT::
 
+            sage: # optional - cryptominisat espresso
             sage: from civerly.cipher_implementations.twine import TWINE_CVL
             sage: from civerly.model_options import *
             sage: import tempfile
-            sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - cryptominisat  # optional - espresso
+            sage: with tempfile.TemporaryDirectory() as tmpdir:
             ....:   cipher = TWINE_CVL(R=3, name="TWINE-3")
             ....:   model_options = MODEL_OPTIONS(
             ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
@@ -266,18 +273,14 @@ class TWINE_CVL:
             ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
             ....:     sat_solver=CRYPTOMINISAT_CVL(),
             ....:     logic_minimizer=ESPRESSO_CVL(),
-            ....:     solve_range=(10, 30),
+            ....:     solve_range=(0, 30),
             ....:     path=Path(tmpdir))
             ....:   cipher.analyse(model_options)
             ....:   trail = str(cipher.get_trail(model_options))
             ....:   assert "Unnamed Component" not in trail
-            5232 variables and 12929 clauses were written to '...'
-            [ 10 , 30] (trying w =  20) : SAT
-            [ 10 , 20] (trying w =  15) : SAT
-            [ 10 , 15] (trying w =  12) : SAT
-            [ 10 , 12] (trying w =  11) : SAT
-            [ 10 , 11] (trying w =  10) : SAT
-            10
+            Using existing file ..., make sure it is up to date!
+            2536 variables and 6553 clauses were written to ...
+            4
 
         Linear cryptanalysis with MILP::
 
@@ -290,12 +293,14 @@ class TWINE_CVL:
             ....:     cryptanalysis=CRYPTANALYSIS.LINEAR,
             ....:     optimization=OPTIMIZATION.MILP,
             ....:     granularity=GRANULARITY.BITWISE,
-            ....:     sbox_modeling=SBOX_MODELING.CONVEX_HULL,
+            ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
             ....:     milp_solver=SCIP_CVL(),
+            ....:     logic_minimizer=ESPRESSO_CVL(),
             ....:     path=Path(tmpdir))
             ....:   cipher.analyse(model_options)
-            6336 variables and 6881 constraints were written to '...'
-            12
+            Using existing file ..., make sure it is up to date!
+            3296 variables and 5793 constraints were written to ...
+            3
         """
         if name is None:
             name = "TWINE"
