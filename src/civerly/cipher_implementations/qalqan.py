@@ -782,7 +782,7 @@ class QALQAN_CVL:
         ....:       path=Path(tmpdir))
         ....:   cipher.analyse(model_options=model_options)
         Using existing file ..., make sure it is up to date!
-        14432 variables and 95211 clauses were written to ...
+        14176 variables and 94699 clauses were written to ...
         28
     """
 
