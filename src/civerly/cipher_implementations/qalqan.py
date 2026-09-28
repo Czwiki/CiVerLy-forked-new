@@ -533,11 +533,11 @@ class QALQAN_CVL:
 
         sage: from civerly.cipher_implementations.qalqan import QALQAN_CVL
         sage: from civerly.util import int_to_vec, vec_to_int
-        sage: pt = bytes(range(16))
+        sage: pt = 0x102030405060708090a0b0c0d0e0f
         sage: ct = vec_to_int(QALQAN_CVL()(
-        ....:     int_to_vec(int.from_bytes(pt, "big"), 128)
-        ....:   )).to_bytes(16, "big")
-        sage: ct == bytes.fromhex("ae19d9af6b1d9d3bd031b18783806c77")
+        ....:     int_to_vec(pt, 128)
+        ....:   ))
+        sage: ct == 0xae19d9af6b1d9d3bd031b18783806c77
         True
 
     Basic encryption with a 256-bit key against a pre-computed known vector::
@@ -565,14 +565,14 @@ class QALQAN_CVL:
         ....:   0x02e4f4854d340fc17b1b87cee1f66973,
         ....:   0x9f4e6d1d76acc3c943a7ffe2f4d3614e,
         ....: ]
-        sage: pt = bytes(range(16))
+        sage: pt = 0x102030405060708090a0b0c0d0e0f
         sage: ct_rks = vec_to_int(QALQAN_CVL(rks=rks)(
-        ....:     int_to_vec(int.from_bytes(pt, "big"), 128)
-        ....:   )).to_bytes(16, "big")
+        ....:     int_to_vec(pt, 128)
+        ....:   ))
         sage: ct_key = vec_to_int(QALQAN_CVL(key=key)(
-        ....:     int_to_vec(int.from_bytes(pt, "big"), 128)
-        ....:   )).to_bytes(16, "big")
-        sage: ct_rks == ct_key == bytes.fromhex("4a4dcffd1527032f1e5418e08d0f5a9d")
+        ....:     int_to_vec(pt, 128)
+        ....:   ))
+        sage: ct_rks == ct_key == 0x4a4dcffd1527032f1e5418e08d0f5a9d
         True
 
     A second, longer key (384 bit) also matches a known vector::
@@ -602,14 +602,14 @@ class QALQAN_CVL:
         ....:   0xaf84d0d8e81a73cc22aec5a54ca11442,
         ....:   0x02c30281ebeac4ff6edc2ab711beaf99,
         ....: ]
-        sage: pt = bytes(range(1, 17))
+        sage: pt = 0x102030405060708090a0b0c0d0e0f10
         sage: ct_rks = vec_to_int(QALQAN_CVL(rks=rks)(
-        ....:     int_to_vec(int.from_bytes(pt, "big"), 128)
-        ....:   )).to_bytes(16, "big")
+        ....:     int_to_vec(pt, 128)
+        ....:   ))
         sage: ct_key = vec_to_int(QALQAN_CVL(key=key)(
-        ....:     int_to_vec(int.from_bytes(pt, "big"), 128)
-        ....:   )).to_bytes(16, "big")
-        sage: ct_rks == ct_key == bytes.fromhex("ccd671da0ec1add7c4dd8aec9918b3fc")
+        ....:     int_to_vec(pt, 128)
+        ....:   ))
+        sage: ct_rks == ct_key == 0xccd671da0ec1add7c4dd8aec9918b3fc
         True
 
     Known vectors for longer keys (512-bit and 1024-bit) also match::
@@ -641,14 +641,14 @@ class QALQAN_CVL:
         ....:   0x63fedb79d2dabfe91c01b52724821bdc,
         ....:   0xb7aa3d885f6d254f3a737c205e4551eb,
         ....: ]
-        sage: pt = bytes(range(16))
+        sage: pt = 0x102030405060708090a0b0c0d0e0f
         sage: ct_rks = vec_to_int(QALQAN_CVL(rks=rks_512)(
-        ....:     int_to_vec(int.from_bytes(pt, "big"), 128)
-        ....:   )).to_bytes(16, "big")
+        ....:     int_to_vec(pt, 128)
+        ....:   ))
         sage: ct_key = vec_to_int(QALQAN_CVL(key=key)(
-        ....:     int_to_vec(int.from_bytes(pt, "big"), 128)
-        ....:   )).to_bytes(16, "big")
-        sage: ct_rks == ct_key == bytes.fromhex("e6087adfa9f9eff16423e8e4a2e2a2ba")
+        ....:     int_to_vec(pt, 128)
+        ....:   ))
+        sage: ct_rks == ct_key == 0xe6087adfa9f9eff16423e8e4a2e2a2ba
         True
 
         sage: key = bytes(range(128))                 # 1024-bit key
@@ -685,12 +685,12 @@ class QALQAN_CVL:
         ....:   0xbe018124754ea6562794e89b87604a59,
         ....: ]
         sage: ct_rks = vec_to_int(QALQAN_CVL(rks=rks_1024)(
-        ....:     int_to_vec(int.from_bytes(pt, "big"), 128)
-        ....:   )).to_bytes(16, "big")
+        ....:     int_to_vec(pt, 128)
+        ....:   ))
         sage: ct_key = vec_to_int(QALQAN_CVL(key=key)(
-        ....:     int_to_vec(int.from_bytes(pt, "big"), 128)
-        ....:   )).to_bytes(16, "big")
-        sage: ct_rks == ct_key == bytes.fromhex("024003fa97d2ec44826428ca4d5f00d5")
+        ....:     int_to_vec(pt, 128)
+        ....:   ))
+        sage: ct_rks == ct_key == 0x024003fa97d2ec44826428ca4d5f00d5
         True
 
     Truncated cipher using the ``R`` parameter::
@@ -718,19 +718,13 @@ class QALQAN_CVL:
         ....:   0x02e4f4854d340fc17b1b87cee1f66973,
         ....:   0x9f4e6d1d76acc3c943a7ffe2f4d3614e,
         ....: ]
-        sage: pt = bytes(range(16))
-        sage: ct_full = vec_to_int(QALQAN_CVL(rks=rks_256bit)(
-        ....:     int_to_vec(int.from_bytes(pt, "big"), 128)
-        ....:   )).to_bytes(16, "big")
-        sage: ct_full == bytes.fromhex("4a4dcffd1527032f1e5418e08d0f5a9d")
+        sage: pt = int_to_vec(0x0102030405060708090a0b0c0d0e0f, 128)
+        sage: ct_full = vec_to_int(QALQAN_CVL(rks=rks_256bit)(pt))
+        sage: ct_full == 0x4a4dcffd1527032f1e5418e08d0f5a9d
         True
-        sage: ct_trunc = vec_to_int(QALQAN_CVL(R=4, rks=rks_256bit)(
-        ....:     int_to_vec(int.from_bytes(pt, "big"), 128)
-        ....:   )).to_bytes(16, "big")
-        sage: ct_trunc_key = vec_to_int(QALQAN_CVL(R=4, key=key)(
-        ....:     int_to_vec(int.from_bytes(pt, "big"), 128)
-        ....:   )).to_bytes(16, "big")
-        sage: ct_trunc == ct_trunc_key == bytes.fromhex("433ed3214f19515e47fc9854fb317d79")
+        sage: ct_trunc = vec_to_int(QALQAN_CVL(R=4, rks=rks_256bit)(pt))
+        sage: ct_trunc_key = vec_to_int(QALQAN_CVL(R=4, key=key)(pt))
+        sage: ct_trunc == ct_trunc_key == 0x433ed3214f19515e47fc9854fb317d79
         True
 
     Explicit round slicing (middle rounds 2 through 5)::
@@ -758,16 +752,16 @@ class QALQAN_CVL:
         ....:   0x02e4f4854d340fc17b1b87cee1f66973,
         ....:   0x9f4e6d1d76acc3c943a7ffe2f4d3614e,
         ....: ]
-        sage: pt = bytes(range(16))
+        sage: pt = 0x102030405060708090a0b0c0d0e0f
         sage: ct_slice = vec_to_int(QALQAN_CVL(
         ....:     start_round=2, end_round=5, rks=rks_256bit)(
-        ....:     int_to_vec(int.from_bytes(pt, "big"), 128)
-        ....:   )).to_bytes(16, "big")
+        ....:     int_to_vec(pt, 128)
+        ....:   ))
         sage: ct_slice_key = vec_to_int(QALQAN_CVL(
         ....:     start_round=2, end_round=5, key=key)(
-        ....:     int_to_vec(int.from_bytes(pt, "big"), 128)
-        ....:   )).to_bytes(16, "big")
-        sage: ct_slice == ct_slice_key == bytes.fromhex("7056c812663bd9c44351a60626edc1b0")
+        ....:     int_to_vec(pt, 128)
+        ....:   ))
+        sage: ct_slice == ct_slice_key == 0x7056c812663bd9c44351a60626edc1b0
         True
 
     Linear trail search on 3 rounds of Qalqan::
@@ -820,10 +814,8 @@ class QALQAN_CVL:
             if end_round < start_round:
                 raise ValueError("end_round must be >= start_round.")
         elif R is not None:
-            R = int(R)
-            assert full_rounds == R, "R doesn't match to length of rks."
             start_round = 0
-            end_round = full_rounds
+            end_round = int(R) - 1
         else:
             start_round = 0
             end_round = full_rounds
