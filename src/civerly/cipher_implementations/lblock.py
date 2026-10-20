@@ -249,9 +249,7 @@ class LBLOCK_CVL(CipherImplementation_CVL, SBoxCipher):
         node = self.add_subcipher(final_swap, [(node, (i, i)) for i in range(64)])
         self.add_output([(node, (i, i)) for i in range(64)])
 
-        self._rk_components = [
-            self.nodes[r + 1].nodes[node_rk] for r in range(self.R)
-        ]
+        self._rk_components = [self.nodes[r + 1].nodes[node_rk] for r in range(self.R)]
 
         if key_schedule is not None and key is not None:
             self.set_round_keys(key)

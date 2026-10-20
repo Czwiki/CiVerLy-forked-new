@@ -1112,9 +1112,7 @@ def _vec_perm(pbox, state_nibbles):
 # ---------------------------------------------------------------------------
 
 
-def blink_key_schedule(
-    master_key, n=64, t=64, tweak=0, key_bytes=None, a=None, b=None
-):
+def blink_key_schedule(master_key, n=64, t=64, tweak=0, key_bytes=None, a=None, b=None):
     r"""
     The Blink tweakey schedule: derive the round-key values of a Blink
     variant from the master key and the tweak.
@@ -1185,17 +1183,17 @@ def blink_key_schedule(
     rk_int = [_bytes_to_int(rk[r]) for r in range(ra + rb)]
     w0, w1 = _bytes_to_int(w[0]), _bytes_to_int(w[1])
     h0, h1 = _bytes_to_int(h[0]), _bytes_to_int(h[1])
-    return (
-        [w0]
-        + rk_int[:a]
-        + [h0]
-        + rk_int[a : a + b]
-        + [h0 ^ h1]
-        + rk_int[:b]
-        + [h1]
-        + rk_int[b : a + b]
-        + [w1]
-    )
+    return [
+        w0,
+        *rk_int[:a],
+        h0,
+        *rk_int[a : a + b],
+        h0 ^ h1,
+        *rk_int[:b],
+        h1,
+        *rk_int[b : a + b],
+        w1,
+    ]
 
 
 def _check_rounds(a, b, ra, rb):
@@ -1402,7 +1400,7 @@ class BLINK_CVL(CipherImplementation_CVL, WordSBoxCipher):
         if key_bytes is None:
             key_bytes = (n // 8) * (ra_rb_from_n_t(n, t) + 2)
 
-        state_bytes, tweak_bytes, ra, rb, pbox, rc, rc_prime = _variant_config(
+        state_bytes, _tweak_bytes, ra, rb, pbox, rc, rc_prime = _variant_config(
             n, t, key_bytes
         )
 

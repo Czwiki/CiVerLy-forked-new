@@ -481,7 +481,6 @@ def _qalqan_round_keys(key, rounds=None):
     return keys
 
 
-
 def _key_to_bytes(master_key, key_size=None):
     r"""
     Coerce ``master_key`` (``bytes`` or an integer) into the ``bytes`` form
@@ -542,10 +541,7 @@ def qalqan_round_keys_to_components(round_keys, key_size=256):
         ['0x2010000000000000000000000000000', '0x102']
     """
     n = _rounds_for_key(key_size // 8)
-    return [
-        _byte_rev_int(rk) if 0 < r < n else rk
-        for r, rk in enumerate(round_keys)
-    ]
+    return [_byte_rev_int(rk) if 0 < r < n else rk for r, rk in enumerate(round_keys)]
 
 
 def qalqan_key_schedule(master_key, key_size=None):
@@ -895,15 +891,13 @@ class QALQAN_CVL(CipherImplementation_CVL, Cipher):
         R = int(R)
         if R < 1:
             raise ValueError("R must be positive.")
-        if R > full_rounds + 1:
+        if full_rounds + 1 < R:
             raise ValueError(
                 f"R={R} exceeds N + 1 = {full_rounds + 1} rounds for a "
                 f"{key_size}-bit key."
             )
 
-        super().__init__(
-            128, 128, R=R, key_schedule=key_schedule, key=key, name=name
-        )
+        super().__init__(128, 128, R=R, key_schedule=key_schedule, key=key, name=name)
 
         # ---- reusable S-box layer -------------------------------------
         sbox_cipher = Cipher(128, 128, name="SBoxLayer")
