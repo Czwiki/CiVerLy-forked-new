@@ -1,5 +1,6 @@
 from sage.crypto.sbox import SBox
 
+from civerly.cipher_implementations.base import CipherImplementation_CVL
 from civerly.component import (
     XOR_CVL,
     PermuteLayer_CVL,
@@ -92,8 +93,8 @@ def lblock_key_schedule(key, rounds=32):
     return rks
 
 
-class LBLOCK_CVL:
-    def __init__(self, R=32, rks=None, name=None):
+class LBLOCK_CVL(CipherImplementation_CVL, SBoxCipher):
+    def __init__(self, R=32, key_schedule=None, key=None, name="LBlock"):
         r"""
         The CiVerLy implementation of LBlock [Wu11].
 
@@ -113,10 +114,26 @@ class LBLOCK_CVL:
 
             - ``R`` -- integer (default: ``32``); number of rounds.
 
-            - ``rks`` -- list (optional); ``R`` many 32-bit round keys.
-              Defaults to all-zero keys.
+            - ``key_schedule`` -- callable or
+              :class:`civerly.keyschedule.KeySchedule` (optional); Key
+              schedule used to derive round keys from ``key`` via
+              ``set_round_keys``. Pass :func:`lblock_key_schedule` to use the
+              real LBlock key schedule, or
+              :class:`civerly.keyschedule.DefaultKeySchedule_CVL` to pass
+              explicit round keys (``R`` of them, 32 bits each). Defaults to
+              ``None`` (no key schedule, all-zero round keys).
 
-            - ``name`` -- string (optional); cipher name.
+            - ``key`` -- integer or list of integers (optional); The 80-bit
+              master key passed to ``key_schedule``, immediately expanded and
+              injected via ``set_round_keys`` when both are given. Has no
+              effect when ``key_schedule`` is ``None``. When using
+              :class:`civerly.keyschedule.DefaultKeySchedule_CVL`, this is the
+              list of round keys (round key 0 first).
+
+            - ``name`` -- string (default: ``"LBlock"``); cipher name.
+
+        This cipher is "plug-and-play" usable, i.e. it can be directly used
+        when imported.
 
         EXAMPLES:
 
@@ -125,12 +142,20 @@ class LBLOCK_CVL:
             sage: from civerly.cipher_implementations.lblock \
             ....:   import LBLOCK_CVL, lblock_key_schedule
             sage: from civerly.util import int_to_vec, vec_to_int
-            sage: rks = lblock_key_schedule(0x0)
-            sage: cipher = LBLOCK_CVL(R=32, rks=rks)
+            sage: cipher = LBLOCK_CVL(R=32, key_schedule=lblock_key_schedule, key=0x0)
             sage: hex(vec_to_int(cipher(int_to_vec(0x0, 64))))
             '0xc218185308e75bcd'
+            sage: cipher.set_round_keys(0x0123456789abcdeffedc)
+            sage: hex(vec_to_int(cipher(int_to_vec(0x0123456789abcdef, 64))))
+            '0x4b7179d8ebee0c26'
+
+        Explicit round keys can be passed via
+        :class:`civerly.keyschedule.DefaultKeySchedule_CVL`::
+
+            sage: from civerly.keyschedule import DefaultKeySchedule_CVL
             sage: rks = lblock_key_schedule(0x0123456789abcdeffedc)
-            sage: cipher = LBLOCK_CVL(R=32, rks=rks)
+            sage: cipher = LBLOCK_CVL(
+            ....:   R=32, key_schedule=DefaultKeySchedule_CVL(32, 32), key=rks)
             sage: hex(vec_to_int(cipher(int_to_vec(0x0123456789abcdef, 64))))
             '0x4b7179d8ebee0c26'
 
@@ -179,10 +204,7 @@ class LBLOCK_CVL:
             4320 variables and 5089 constraints were written to ...
             6
         """
-        if rks is None:
-            rks = [0x0 for _ in range(R)]
-        if name is None:
-            name = "LBlock"
+        super().__init__(64, 64, R=R, key_schedule=key_schedule, key=key, name=name)
 
         # Reusable layers
         sboxlayer = _build_sbox_layer()
@@ -215,25 +237,21 @@ class LBLOCK_CVL:
         lblock_round.add_output([(lblock_round.IN, (i, i + 32)) for i in range(32)])
 
         # Full cipher
-        cipher = SBoxCipher(64, 64, name=name)
-        node = cipher.IN
-        for r in range(R):
-            lblock_round.nodes[node_rk].const = rks[r]
-            node = cipher.add_subcipher(
-                lblock_round, [(node, (i, i)) for i in range(64)]
-            )
+        node = self.IN
+        for _ in range(self.R):
+            node = self.add_subcipher(lblock_round, [(node, (i, i)) for i in range(64)])
 
         # After 32 rounds the state is (X33, X32).
         # The ciphertext must be X32 || X33, so we swap the halves.
         final_swap = PermuteLayer_CVL(
             list(range(32, 64)) + list(range(32)), name="FinalSwap"
         )
-        node = cipher.add_subcipher(final_swap, [(node, (i, i)) for i in range(64)])
-        cipher.add_output([(node, (i, i)) for i in range(64)])
+        node = self.add_subcipher(final_swap, [(node, (i, i)) for i in range(64)])
+        self.add_output([(node, (i, i)) for i in range(64)])
 
-        self.cipher = cipher
+        self._rk_components = [
+            self.nodes[r + 1].nodes[node_rk] for r in range(self.R)
+        ]
 
-    def __new__(cls, *args, **kwargs):
-        instance = super().__new__(cls)
-        instance.__init__(*args, **kwargs)
-        return instance.cipher
+        if key_schedule is not None and key is not None:
+            self.set_round_keys(key)

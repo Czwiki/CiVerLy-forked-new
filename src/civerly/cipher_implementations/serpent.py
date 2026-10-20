@@ -11,9 +11,10 @@ final permutation (FP).
 
 EXAMPLES::
 
-    sage: from civerly.cipher_implementations.serpent import SERPENT_CVL
+    sage: from civerly.cipher_implementations.serpent \
+    ....:   import SERPENT_CVL, serpent_key_schedule
     sage: from civerly.util import int_to_vec, vec_to_int
-    sage: serpent = SERPENT_CVL(master_key=0, keylen=128)
+    sage: serpent = SERPENT_CVL(key_schedule=serpent_key_schedule, key=0)
     sage: pt = int('8ED77392F29990EDA7A3A3CE6F579DD2', 16)
     sage: ct = vec_to_int(serpent(int_to_vec(pt, 128)))
     sage: hex(ct)
@@ -25,6 +26,7 @@ from sage.crypto.sbox import SBox as SBox_sage
 from sage.matrix.constructor import Matrix as matrix
 from sage.rings.finite_rings.finite_field_constructor import GF
 
+from civerly.cipher_implementations.base import CipherImplementation_CVL
 from civerly.component import (
     LinearLayer_CVL,
     PermuteLayer_CVL,
@@ -348,8 +350,11 @@ def serpent_key_schedule(master_key, keylen=128, R=32):
     permutation (IP) is applied to each round key to obtain the
     standard-mode subkeys ``KHat``.
 
-    The round keys are returned as 128-bit integers, compatible with the
-    ``rks`` parameter of :class:`SERPENT_CVL`.
+    The round keys are returned as 128-bit integers, in the order of the
+    round-key components of :class:`SERPENT_CVL`, so this function can be
+    passed directly as its ``key_schedule`` (a reduced-round cipher only
+    uses the leading round keys). For a 256-bit key, bind ``keylen`` with
+    :func:`functools.partial`.
 
     INPUT:
 
@@ -361,7 +366,7 @@ def serpent_key_schedule(master_key, keylen=128, R=32):
         - ``R`` -- integer (default: ``32``); Number of rounds. The function
           returns ``R + 1`` round keys.
 
-    OUTPUT: A list of ``R + 1`` round key integers.
+    OUTPUT: A list of ``R + 1`` round key integers ``K_0, ..., K_R``.
 
     EXAMPLES::
 
@@ -388,7 +393,8 @@ def serpent_key_schedule(master_key, keylen=128, R=32):
 
         Verify with the test vector from the NESSIE suite (128-bit key)::
 
-            sage: from civerly.cipher_implementations.serpent import serpent_key_schedule
+            sage: from civerly.cipher_implementations.serpent \
+            ....:   import serpent_key_schedule
             sage: key = int("80000000000000000000000000000000", 16)
             sage: rks = serpent_key_schedule(key, keylen=128)
             sage: hex(rks[0])
@@ -478,7 +484,8 @@ def _build_serpent_linear_layer():
 
     TESTS::
 
-        sage: from civerly.cipher_implementations.serpent import _build_serpent_linear_layer
+        sage: from civerly.cipher_implementations.serpent \
+        ....:   import _build_serpent_linear_layer
         sage: _build_serpent_linear_layer() # returns LinearLayer_CVL
         LT
 
@@ -625,53 +632,59 @@ def _build_serpent_linear_layer():
 # ---------------------------------------------------------------------------
 # Main cipher class
 # ---------------------------------------------------------------------------
-class SERPENT_CVL:
-    r"""
-    The CiVerLy implementation of the Serpent block cipher.
+class SERPENT_CVL(CipherImplementation_CVL, SBoxCipher):
+    def __init__(self, R=32, key_schedule=None, key=None, name="SERPENT"):
+        r"""
+        The CiVerLy implementation of the Serpent block cipher.
 
-    Serpent is a 32-round SP-network operating on four 32-bit words,
-    giving a block size of 128 bits. The cipher consists of:
+        Serpent is a 32-round SP-network operating on four 32-bit words,
+        giving a block size of 128 bits. The cipher consists of:
 
-    - An initial permutation (IP)
-    - 32 rounds, each applying: key mixing XOR, S-box layer, linear
-      transformation (except the last round, which replaces LT by an
-      additional key XOR)
-    - A final permutation (FP)
+        - An initial permutation (IP)
+        - 32 rounds, each applying: key mixing XOR, S-box layer, linear
+          transformation (except the last round, which replaces LT by an
+          additional key XOR)
+        - A final permutation (FP)
 
-    INPUT::
+        INPUT:
 
-        - ``R`` -- integer; Number of rounds (default: ``32``). Mutually
-          exclusive with an explicit ``(start, end)`` range.
+            - ``R`` -- integer (default: ``32``); Number of rounds, starting
+              from round 0. A reduced-round cipher ends with the final key XOR
+              (instead of the linear transformation) and FP.
 
-        - ``rks`` -- list (optional); Specifies the round key values.
-          Must have length ``R+1`` (33 keys for full-round Serpent).
-          Defaults to all zeros. May not be combined with ``master_key``.
+            - ``key_schedule`` -- callable or
+              :class:`civerly.keyschedule.KeySchedule` (optional); Key
+              schedule used to derive round keys from ``key`` via
+              ``set_round_keys``. Pass :func:`serpent_key_schedule` to use the
+              real Serpent key schedule (128-bit keys; bind ``keylen`` with
+              :func:`functools.partial` for other key lengths), or
+              :class:`civerly.keyschedule.DefaultKeySchedule_CVL` to pass
+              explicit round keys (``R + 1`` of them, 128 bits each).
+              Defaults to ``None`` (no key schedule, all-zero round keys).
 
-        - ``master_key`` -- integer (optional); A master key from which round
-          keys are derived via :func:`serpent_key_schedule`. May not be
-          combined with ``rks``.
+            - ``key`` -- integer or list of integers (optional); The master
+              key passed to ``key_schedule``, immediately expanded and
+              injected via ``set_round_keys`` when both are given. Has no
+              effect when ``key_schedule`` is ``None``. When using
+              :class:`civerly.keyschedule.DefaultKeySchedule_CVL`, this is the
+              list of round keys (round key 0 first).
 
-        - ``keylen`` -- integer (default: ``128``); Length of ``master_key`` in bits.
+            - ``name`` -- string (default: ``"SERPENT"``); The name of the
+              cipher.
 
-        - ``name`` -- string (optional); The name of the cipher.
+        This cipher is "plug-and-play" usable, i.e. it can be directly used
+        when imported.
 
-        - ``start`` -- integer (default: ``0``); The first Serpent round to
-          include, indexed from 0. Use this to construct a reduced-round cipher
-          starting at a later round (e.g. ``start=4`` for an attack on rounds
-          4--10). Must be provided together with ``end``.
-
-        - ``end`` -- integer (optional); The last Serpent round to include,
-          indexed from 0. If given, ``R`` is computed as ``end - start + 1``.
-
-    EXAMPLES::
+        EXAMPLES:
 
         Verify encryption with the NESSIE test vectors
         (see https://biham.cs.technion.ac.il/Reports/Serpent/)
         with KEYSIZE=128, KEY=0 from ``ecb_tbl_precomputed.txt``::
 
-            sage: from civerly.cipher_implementations.serpent import SERPENT_CVL
+            sage: from civerly.cipher_implementations.serpent \
+            ....:   import SERPENT_CVL, serpent_key_schedule
             sage: from civerly.util import int_to_vec, vec_to_int
-            sage: serpent = SERPENT_CVL(master_key=0, keylen=128)
+            sage: serpent = SERPENT_CVL(key_schedule=serpent_key_schedule, key=0)
             sage: pt1 = int('8ED77392F29990EDA7A3A3CE6F579DD2', 16)
             sage: hex(vec_to_int(serpent(int_to_vec(pt1, 128))))
             '0x2d99fd0696ced14886b0e88a968b28b2'
@@ -682,59 +695,50 @@ class SERPENT_CVL:
             sage: hex(vec_to_int(serpent(int_to_vec(pt3, 128))))
             '0x18e7f7888133888b42b78653501bba41'
 
+        Explicit round keys can be passed via
+        :class:`civerly.keyschedule.DefaultKeySchedule_CVL`::
+
+            sage: from civerly.keyschedule import DefaultKeySchedule_CVL
+            sage: rks = serpent_key_schedule(0)
+            sage: serpent = SERPENT_CVL(
+            ....:   key_schedule=DefaultKeySchedule_CVL(128, 33), key=rks)
+            sage: hex(vec_to_int(serpent(int_to_vec(pt1, 128))))
+            '0x2d99fd0696ced14886b0e88a968b28b2'
+
+        Other key lengths are selected by binding ``keylen``::
+
+            sage: from functools import partial
+            sage: ks256 = partial(serpent_key_schedule, keylen=256)
+            sage: serpent = SERPENT_CVL(key_schedule=ks256, key=0)
+            sage: ct = serpent(int_to_vec(pt1, 128))
+            sage: rks = serpent_key_schedule(0, keylen=256)
+            sage: serpent = SERPENT_CVL(
+            ....:   key_schedule=DefaultKeySchedule_CVL(128, 33), key=rks)
+            sage: serpent(int_to_vec(pt1, 128)) == ct
+            True
+
         Instantiate with a master key (round keys are derived automatically)::
 
-            sage: serpent = SERPENT_CVL(R=1, master_key=0, keylen=128)
+            sage: serpent = SERPENT_CVL(R=1, key_schedule=serpent_key_schedule, key=0)
             sage: result = serpent(int_to_vec(0x0, 128))
             sage: vec_to_int(result) > 0
             True
 
-        Construct a sliced version of the cipher (rounds 4-10).
-        In this mode the internal data path is preserved: IP and FP are
-        omitted because they lie outside the chosen range, and every selected
-        round keeps its linear transformation (only the true final round, 31,
-        would receive an extra key XOR instead).::
+        A reduced-round cipher (R=7) ends with the final key XOR and FP::
 
-            sage: serpent = SERPENT_CVL(master_key=0, keylen=128, start=4, end=10)
-            sage: result = serpent(int_to_vec(0x0, 128))
-            sage: vec_to_int(result) > 0
-            True
-            sage: names = [n.name for n in serpent.nodes]
-            sage: 'IP' in names
-            False
-            sage: 'FP' in names
-            False
-            sage: names.count('LT')
-            7
-
-        Backward-compatible reduced-round cipher (R=7) still ends with the
-        final key XOR and FP::
-
-            sage: serpent = SERPENT_CVL(master_key=0, keylen=128, R=7)
+            sage: serpent = SERPENT_CVL(R=7, key_schedule=serpent_key_schedule, key=0)
             sage: names = [n.name for n in serpent.nodes]
             sage: 'FP' in names
             True
             sage: names.count('LT')
             6
 
-        ``R`` and ``(start, end)`` are mutually exclusive, and ``start``/``end``
-        must be supplied together::
+        At most 32 rounds are supported::
 
-            sage: SERPENT_CVL(R=7, start=4, end=10)
+            sage: SERPENT_CVL(R=33)
             Traceback (most recent call last):
             ...
-            ValueError: R cannot be combined with an explicit (start, end) range
-            sage: SERPENT_CVL(start=4)
-            Traceback (most recent call last):
-            ...
-            ValueError: start and end must be provided together
-
-        ``master_key`` and ``rks`` are mutually exclusive::
-
-            sage: SERPENT_CVL(master_key=0, rks=[0] * 34)
-            Traceback (most recent call last):
-            ...
-            ValueError: master_key and rks are mutually exclusive
+            ValueError: Serpent only supports up to 32 rounds
 
         Model the cipher with SAT::
 
@@ -758,47 +762,11 @@ class SERPENT_CVL:
             ....:   assert "Unnamed Component" not in trail
             6884 variables and 19953 clauses were written to ...
             19
-    """
-
-    def __init__(
-        self, R=32, rks=None, master_key=None, keylen=128, name=None, start=0, end=None
-    ):
-        if name is None:
-            name = "SERPENT"
-
-        if master_key is not None and rks is not None:
-            raise ValueError("master_key and rks are mutually exclusive")
-
-        explicit_slice = end is not None
-        if explicit_slice and R != 32:
-            raise ValueError("R cannot be combined with an explicit (start, end) range")
-        if not explicit_slice and start != 0:
-            raise ValueError("start and end must be provided together")
-        if end is None:
-            end = start + R - 1
-        else:
-            R = end - start + 1
-
+        """
         if R > 32:
             raise ValueError("Serpent only supports up to 32 rounds")
-        if start < 0 or end >= 32:
-            raise ValueError("Invalid round range for Serpent")
 
-        # exact_slice: build the exact internal data path when the caller
-        # explicitly requested a round range via (start, end).  In this mode
-        # IP/FP are omitted unless the slice reaches the real cipher
-        # boundaries, and every selected round keeps its original LT except
-        # the true final round (31).
-        exact_slice = explicit_slice
-
-        if rks is None:
-            if master_key is not None:
-                full_rks = serpent_key_schedule(master_key, keylen=keylen, R=32)
-                rks = full_rks[start : start + R + 1]
-            else:
-                rks = [0 for _ in range(R + 1)]
-        elif len(rks) < R + 1:
-            raise ValueError(f"Need at least {R + 1} round keys, got {len(rks)}")
+        super().__init__(128, 128, R=R, key_schedule=key_schedule, key=key, name=name)
 
         lt = _build_serpent_linear_layer()
 
@@ -818,65 +786,46 @@ class SERPENT_CVL:
             sboxlayer.add_output(output_edges)
             return sboxlayer
 
-        cipher = SBoxCipher(128, 128, name=name)
+        rk_nodes = []
 
         # Initial permutation: standard -> standard-permuted (bitslice)
-        if not exact_slice or start == 0:
-            ip = PermuteLayer_CVL(FP_TABLE, name="IP")
-            current = cipher.add_subcipher(
-                ip, [(cipher.IN, (i, i)) for i in range(128)]
-            )
-        else:
-            current = cipher.IN
+        ip = PermuteLayer_CVL(FP_TABLE, name="IP")
+        current = self.add_subcipher(ip, [(self.IN, (i, i)) for i in range(128)])
 
-        for r in range(R):
-            round_num = start + r
+        for round_num in range(self.R):
             # Key addition
-            key_add = RoundkeyXOR_CVL(128, rks[r], name=f"K{round_num}")
-            current = cipher.add_subcipher(
+            key_add = RoundkeyXOR_CVL(128, 0x0, name=f"K{round_num}")
+            current = self.add_subcipher(
                 key_add, [(current, (i, i)) for i in range(128)]
             )
+            rk_nodes.append(current)
 
             # S-box layer
             sboxlayer = make_sboxlayer(round_num)
-            current = cipher.add_subcipher(
+            current = self.add_subcipher(
                 sboxlayer, [(current, (i, i)) for i in range(128)]
             )
 
-            if r == R - 1:
-                if exact_slice and round_num == 31:
-                    # True final round of Serpent: extra key XOR
-                    key_final = RoundkeyXOR_CVL(128, rks[R], name=f"K{round_num + 1}")
-                    current = cipher.add_subcipher(
-                        key_final, [(current, (i, i)) for i in range(128)]
-                    )
-                elif exact_slice:
-                    # Internal round in an exact slice: keep LT
-                    current = cipher.add_subcipher(
-                        lt, [(current, (i, i)) for i in range(128)]
-                    )
-                else:
-                    # Reduced-round mode: last round uses key XOR instead of LT
-                    key_final = RoundkeyXOR_CVL(128, rks[R], name=f"K{round_num + 1}")
-                    current = cipher.add_subcipher(
-                        key_final, [(current, (i, i)) for i in range(128)]
-                    )
+            if round_num == self.R - 1:
+                # Last round: extra key XOR instead of LT
+                key_final = RoundkeyXOR_CVL(128, 0x0, name=f"K{round_num + 1}")
+                current = self.add_subcipher(
+                    key_final, [(current, (i, i)) for i in range(128)]
+                )
+                rk_nodes.append(current)
             else:
                 # Linear transformation
-                current = cipher.add_subcipher(
+                current = self.add_subcipher(
                     lt, [(current, (i, i)) for i in range(128)]
                 )
 
         # Final permutation: standard-permuted -> standard
-        if not exact_slice or end == 31:
-            fp = PermuteLayer_CVL(IP_TABLE, name="FP")
-            current = cipher.add_subcipher(fp, [(current, (i, i)) for i in range(128)])
+        fp = PermuteLayer_CVL(IP_TABLE, name="FP")
+        current = self.add_subcipher(fp, [(current, (i, i)) for i in range(128)])
 
-        cipher.add_output([(current, (i, i)) for i in range(128)])
+        self.add_output([(current, (i, i)) for i in range(128)])
 
-        self.cipher = cipher
+        self._rk_components = [self.nodes[n] for n in rk_nodes]
 
-    def __new__(cls, *args, **kwargs):
-        instance = super().__new__(cls)
-        instance.__init__(*args, **kwargs)
-        return instance.cipher
+        if key_schedule is not None and key is not None:
+            self.set_round_keys(key)

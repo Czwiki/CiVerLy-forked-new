@@ -13,19 +13,19 @@ objects. All six published variants are supported:
     Blink-128B  (128-bit block, 256-bit tweak, 160-byte key, a=3, b=5)
 
 The internal state is organised as a rectangular array of 4-bit nibbles with
-4 rows, which makes ``AESlike`` (wordsize 4) the natural base class: the
-MixColumn layer acts column-wise and the shuffle layer acts on the whole
-state. The rather involved key schedule (Toeplitz-hash based) is treated as a
-black box and baked into the graph as ``RoundkeyXOR_CVL`` constants, exactly
-as recommended in ``documentation/README.md`` section 6. This keeps the
-cipher fully compatible with the modeling pipeline while still matching the
-published test vectors.
+4 rows. The cipher is built on ``WordSBoxCipher`` (wordsize 4); MixColumn is
+a single full-state linear layer (see ``_mix_columns``) and the shuffle layer
+acts on the whole state. The (Toeplitz-hash based) tweakey schedule is
+implemented in Python by :func:`blink_key_schedule`, which yields the
+whitening keys, round keys and tweak hashes that are injected into the
+cipher's round-key components via ``set_round_keys``.
 """
 
 from sage.crypto.sbox import SBox
 from sage.matrix.constructor import Matrix as matrix
 from sage.rings.finite_rings.finite_field_constructor import GF
 
+from civerly.cipher_implementations.base import CipherImplementation_CVL
 from civerly.component import (
     LinearLayer_CVL,
     PermuteLayer_CVL,
@@ -1108,236 +1108,329 @@ def _vec_perm(pbox, state_nibbles):
 
 
 # ---------------------------------------------------------------------------
+# Public key schedule
+# ---------------------------------------------------------------------------
+
+
+def blink_key_schedule(
+    master_key, n=64, t=64, tweak=0, key_bytes=None, a=None, b=None
+):
+    r"""
+    The Blink tweakey schedule: derive the round-key values of a Blink
+    variant from the master key and the tweak.
+
+    Blink XORs five kinds of key material into the state: the whitening keys
+    ``w0`` / ``w1``, the round keys ``rk[0..a+b-1]`` and the tweak hashes
+    ``h0`` / ``h1`` (``h0 ^ h1`` in the middle stage). They are returned in
+    the order in which they occur in the cipher::
+
+        w0, rk[0..a-1], h0, rk[a..a+b-1], h0^h1,
+        rk[0..b-1], h1, rk[b..a+b-1], w1
+
+    i.e. ``2 * (a + b) + 5`` values of ``n`` bits each, matching the
+    ``_rk_components`` of :class:`BLINK_CVL` with the same ``a`` and ``b``.
+
+    INPUT:
+
+        - ``master_key`` -- integer; The master key (``key_bytes`` bytes).
+
+        - ``n`` -- integer (default: ``64``); Block size in bits, ``64`` or
+          ``128``.
+
+        - ``t`` -- integer (default: ``64``); Tweak size in bits.
+
+        - ``tweak`` -- integer (default: ``0``); The tweak.
+
+        - ``key_bytes`` -- integer (optional); Master key size in bytes,
+          which selects the variant for ``n = 128`` (``128`` for Blink-128a/b,
+          ``160`` for Blink-128A/B). Defaults to ``56`` for ``n = 64`` and
+          ``128`` for ``n = 128``.
+
+        - ``a``, ``b`` -- integers (optional); Number of outer / inner keyed
+          rounds of the (reduced) cipher, as in :class:`BLINK_CVL`. Default
+          to the standard values of the variant.
+
+    OUTPUT: A list of ``2 * (a + b) + 5`` integers of ``n`` bits each.
+
+    To use it as key schedule of :class:`BLINK_CVL` for anything but the
+    default parameters, fix the remaining arguments with
+    ``functools.partial`` (see :class:`BLINK_CVL`).
+
+    EXAMPLES::
+
+        sage: from civerly.cipher_implementations.blink import blink_key_schedule
+        sage: rks = blink_key_schedule(0, tweak=0x0123456789abcdef)
+        sage: len(rks)
+        15
+        sage: [hex(rk) for rk in rks[:3]]
+        ['0x0', '0x0', '0x0']
+        sage: len(blink_key_schedule(0, a=1, b=1))
+        9
+        sage: len(blink_key_schedule(0, n=128, t=256, key_bytes=160))
+        21
+    """
+    assert n in [64, 128], f"Block size must be 64 or 128, not {n}!"
+    assert t in [64, 128, 256], f"Tweak size {t} not supported!"
+    if key_bytes is None:
+        key_bytes = (n // 8) * (ra_rb_from_n_t(n, t) + 2)
+    state_bytes, tweak_bytes, ra, rb, _, _, _ = _variant_config(n, t, key_bytes)
+    a, b = _check_rounds(a, b, ra, rb)
+
+    # The reference treats the master key and tweak in LSB-first byte order.
+    mk = [(master_key >> (8 * i)) & 0xFF for i in range(key_bytes)]
+    tw = [(tweak >> (8 * i)) & 0xFF for i in range(tweak_bytes)]
+    rk, w, h = _generate_round_key(mk, tw, state_bytes, tweak_bytes, key_bytes)
+
+    # Convert every value to a single integer (LSB-first bytes).
+    rk_int = [_bytes_to_int(rk[r]) for r in range(ra + rb)]
+    w0, w1 = _bytes_to_int(w[0]), _bytes_to_int(w[1])
+    h0, h1 = _bytes_to_int(h[0]), _bytes_to_int(h[1])
+    return (
+        [w0]
+        + rk_int[:a]
+        + [h0]
+        + rk_int[a : a + b]
+        + [h0 ^ h1]
+        + rk_int[:b]
+        + [h1]
+        + rk_int[b : a + b]
+        + [w1]
+    )
+
+
+def _check_rounds(a, b, ra, rb):
+    """Default ``a``, ``b`` to the variant's ``ra``, ``rb`` and check them."""
+    if a is None:
+        a = ra
+    if b is None:
+        b = rb
+    assert a >= 0 and b >= 0, "a and b must be non-negative"
+    assert a + b <= ra + rb, (
+        f"a({a}) + b({b}) exceeds available round keys/constants "
+        f"for this variant (max {ra + rb})"
+    )
+    return a, b
+
+
+# ---------------------------------------------------------------------------
 # Public cipher class
 # ---------------------------------------------------------------------------
 
 
-class BLINK_CVL:
-    r"""
-    The CiVerLy implementation of the Blink tweakable block cipher family.
-
-    The cipher is parameterised by its block size ``n``, tweak size ``t`` and
-    the (master) ``key``. The key schedule is evaluated eagerly (using the
-    reference algorithm) and the resulting round keys, whitening keys and hash
-    values are baked into the graph as ``RoundkeyXOR_CVL`` constants, which is
-    sufficient for differential/linear trail analysis.
-
-    INPUT:
-
-        - ``n`` -- integer; Block size in bits, must be ``64`` or ``128``.
-
-        - ``t`` -- integer; Tweak size in bits, one of ``{64, 128, 256}`` for
-          ``n = 64`` and one of ``{128, 256}`` for ``n = 128``.
-
-        - ``key`` -- integer (optional); The master key. Defaults to ``0``,
-          which (for non-zero tweak) still yields a valid cipher; for trail
-          analysis the concrete value does not matter as it is a constant
-          XOR.
-
-        - ``tweak`` -- integer (optional); The tweak. Defaults to ``0``.
-
-        - ``name`` -- string (optional); Name of the cipher instance.
-
-        - ``a`` -- integer (optional); Number of outer forward / inverse
-          keyed rounds (replaces the variant's default ``ra``). Defaults to
-          the standard value for the chosen block/tweak size.
-
-        - ``b`` -- integer (optional); Number of inner forward / inverse
-          keyed rounds (replaces the variant's default ``rb``). Defaults to
-          the standard value for the chosen block/tweak size.
-
-        - ``start`` -- integer (optional); 1-based index of the first
-          S-box layer to include. When provided, ``a`` and ``b`` only
-          determine the variant's keyed-round budget; the slice is built
-          over the full sequence of S-box layers (keyed rounds plus the
-          four structural middle S-box layers). Useful for isolating
-          Superbox trails (e.g. ``start=4`` starts at the input to the
-          ``h0`` middle stage).
-
-        - ``end`` -- integer (optional); 1-based index of the last
-          S-box layer to include (must be given together with ``start``).
-
-        - ``include_w0`` -- bool (optional); Whether to prepend the initial
-          whitening ``w0``. Defaults to ``True`` when ``start`` is
-          ``1`` or ``None``, otherwise ``False``.
-
-        - ``include_w1`` -- bool (optional); Whether to append the final
-          whitening ``w1``. Defaults to ``True`` when ``end`` equals the
-          total number of S-box layers (or when ``start`` is ``None``),
-          otherwise ``False``.
-
-    The test vectors below are taken from ``documentation/blink test
-    vectors.md`` (and agree with ``documentation/blink.py``)::
-
-        sage: from civerly.cipher_implementations.blink import BLINK_CVL
-        sage: from civerly.util import int_to_vec, vec_to_int
-
-        sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa1
-        sage: blink = BLINK_CVL(64, 64, key=key, tweak=0x0123456789abcdef)
-        sage: hex(vec_to_int(blink(int_to_vec(0, 64))))
-        '0xa4a0d10502be846e'
-
-        sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa1
-        sage: blink = BLINK_CVL(64, 128, key=key, tweak=0x0123456789abcdef0123456789abcdef)
-        sage: hex(vec_to_int(blink(int_to_vec(0, 64))))
-        '0x743e142f17caaae1'
-
-        sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa15e2b66350517f80f2961c648d578bae174d70cb769c30a45cc40300fe8a342ca57a0bd0251ae39b621b8f104904374bbd6a102e234a664e421b8f104904374bbd6a102d888a666e4
-        sage: blink = BLINK_CVL(128, 128, key=key, tweak=0x0123456789abcdef0123456789abcdef)
-        sage: hex(vec_to_int(blink(int_to_vec(0, 128))))
-        '0xb722eef350bb182074a6ff13c967a593'
-
-        sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa15e2b66350517f80f2961c648d578bae174d70cb769c30a45cc40300fe8a342ca57a0bd0251ae39b621b8f104904374bbd6a102e234a664e421b8f104904374bbd6a102d888a666e4
-        sage: blink = BLINK_CVL(128, 256, key=key, tweak=0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef)
-        sage: hex(vec_to_int(blink(int_to_vec(0, 128))))
-        '0x20705a38e00412165bdabcac1dcbdec2'
-
-        sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa15e2b66350517f80f2961c648d578bae174d70cb769c30a45cc40300fe8a342ca57a0bd0251ae39b621b8f104904374bbd6a102e234a664e421b8f104904374bbd6a102d888a666e428962a4c96893eda752c17026a6395c2d6963be43b2fc10813d73f5a4a48d28d
-        sage: blink = BLINK_CVL(128, 128, key=key, tweak=0x0123456789abcdef0123456789abcdef)
-        sage: hex(vec_to_int(blink(int_to_vec(0, 128))))
-        '0x82449f141c183601195b5046eac2b026'
-
-        sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa15e2b66350517f80f2961c648d578bae174d70cb769c30a45cc40300fe8a342ca57a0bd0251ae39b621b8f104904374bbd6a102e234a664e421b8f104904374bbd6a102d888a666e428962a4c96893eda752c17026a6395c2d6963be43b2fc10813d73f5a4a48d28d
-        sage: blink = BLINK_CVL(128, 256, key=key, tweak=0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef)
-        sage: hex(vec_to_int(blink(int_to_vec(0, 128))))
-        '0x8dc41b223bc8cd9923b1297dd27583fc'
-
-    Reduced-round instances can be built by passing ``a`` and ``b`` (which
-    count *keyed* rounds ``R`` only; the middle tweak stages ``h0`` / center /
-    ``h1`` are always present in this mode)::
-
-        sage: from civerly.cipher_implementations.blink import BLINK_CVL
-        sage: blink = BLINK_CVL(64, 64, a=1, b=1)
-        sage: blink.is_valid
-        True
-
-    Sliced instances are built with ``start`` / ``end``. Rounds are
-    numbered by S-box layer; for the default Blink-64 variant this gives
-    ``1 … 14``. Rounds ``1-2`` are the outer forward block, rounds ``4-6``
-    the inner forward block, rounds ``9-11`` the inner backward block and
-    rounds ``13-14`` the outer backward block. The structural middle
-    stages are numbered as rounds too: ``3`` is ``h0`` (S, M, AK(h0), P),
-    ``7`` and ``8`` are the two S-boxes of ``hxor`` (with the MixColumn
-    and constant XOR between them), and ``12`` is ``h1`` (P^-1, AK(h1),
-    M, S). The full sliced cipher reproduces the published test vector::
-
-        sage: from civerly.cipher_implementations.blink import BLINK_CVL
-        sage: from civerly.util import int_to_vec, vec_to_int
-        sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa1
-        sage: blink = BLINK_CVL(64, 64, key=key, tweak=0x0123456789abcdef, start=1, end=14)
-        sage: hex(vec_to_int(blink(int_to_vec(0, 64))))
-        '0xa4a0d10502be846e'
-
-    Model the cipher with SAT::
-
-        sage: from civerly.cipher_implementations.blink import BLINK_CVL
-        sage: from civerly.model_options import *
-        sage: import tempfile
-        sage: blink = BLINK_CVL(64, 64, start=1, end=3, name="blink-64a")
-        sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - cryptominisat
-        ....:   model_options = MODEL_OPTIONS(
-        ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
-        ....:     optimization=OPTIMIZATION.SAT,
-        ....:     granularity=GRANULARITY.BITWISE,
-        ....:     linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
-        ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-        ....:     sat_solver=CRYPTOMINISAT_CVL(),
-        ....:     logic_minimizer=ESPRESSO_CVL(),
-        ....:     path=Path(tmpdir))
-        ....:   blink.analyse(model_options)
-        Using existing file ..., make sure it is up to date!
-        5712 variables and 14657 clauses were written to ...
-        14
-    """
-
+class BLINK_CVL(CipherImplementation_CVL, WordSBoxCipher):
     def __init__(
         self,
         n=64,
         t=64,
-        key=0,
-        tweak=0,
+        key_schedule=None,
+        key=None,
         name=None,
+        key_bytes=None,
         a=None,
         b=None,
-        start=None,
-        end=None,
-        include_w0=None,
-        include_w1=None,
     ):
-        if name is None:
-            name = f"Blink-{n}"
+        r"""
+        The CiVerLy implementation of the Blink tweakable block cipher family.
 
+        The cipher is parameterised by its block size ``n``, tweak size ``t``
+        and master key size ``key_bytes``. All key material (whitening keys,
+        round keys and tweak hashes) is added via round-key components, which
+        are all-zero unless a key schedule and key are given. The round
+        constants are fixed and part of the graph.
+
+        INPUT:
+
+            - ``n`` -- integer (default: ``64``); Block size in bits, must be
+              ``64`` or ``128``.
+
+            - ``t`` -- integer (default: ``64``); Tweak size in bits, one of
+              ``{64, 128, 256}`` for ``n = 64`` and one of ``{128, 256}`` for
+              ``n = 128``.
+
+            - ``key_schedule`` -- callable or
+              :class:`civerly.keyschedule.KeySchedule` (optional); Key
+              schedule used to derive round keys from ``key`` via
+              ``set_round_keys``. Pass :func:`blink_key_schedule` (with ``n``,
+              ``t``, ``tweak`` and ``key_bytes`` fixed via
+              ``functools.partial``) to use the real Blink tweakey schedule,
+              or :class:`civerly.keyschedule.DefaultKeySchedule_CVL` to pass
+              explicit round keys (``2 * (a + b) + 5`` of them, ``n`` bits
+              each, in the order of :func:`blink_key_schedule`). Defaults to
+              ``None`` (no key schedule, all-zero round keys).
+
+            - ``key`` -- integer or list of integers (optional); The master
+              key passed to ``key_schedule``, immediately expanded and
+              injected via ``set_round_keys`` when both are given. Has no
+              effect when ``key_schedule`` is ``None``. When using
+              :class:`civerly.keyschedule.DefaultKeySchedule_CVL`, this is the
+              list of round keys.
+
+            - ``name`` -- string (optional); Name of the cipher instance.
+              Defaults to ``"Blink-{n}"``.
+
+            - ``key_bytes`` -- integer (optional); Master key size in bytes,
+              which selects the variant (and its round constants) for
+              ``n = 128``: ``128`` for Blink-128a/b and ``160`` for
+              Blink-128A/B. Defaults to ``56`` for ``n = 64`` and ``128`` for
+              ``n = 128``.
+
+            - ``a`` -- integer (optional); Number of outer forward / inverse
+              keyed rounds (replaces the variant's default ``ra``). Defaults
+              to the standard value for the chosen variant.
+
+            - ``b`` -- integer (optional); Number of inner forward / inverse
+              keyed rounds (replaces the variant's default ``rb``). Defaults
+              to the standard value for the chosen variant.
+
+        The number of rounds ``R`` is the number of S-box layers of the
+        instance, ``2 * (a + b) + 4``. For a reduced instance, pass the same
+        ``a`` and ``b`` to :func:`blink_key_schedule`.
+
+        This cipher is "plug-and-play" usable, i.e. it can be directly used
+        when imported.
+
+        EXAMPLES:
+
+        The test vectors below are taken from ``documentation/blink test
+        vectors.md`` (and agree with ``documentation/blink.py``)::
+
+            sage: from functools import partial
+            sage: from civerly.cipher_implementations.blink \
+            ....:   import BLINK_CVL, blink_key_schedule
+            sage: from civerly.util import int_to_vec, vec_to_int
+
+            sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa1
+            sage: ks = partial(blink_key_schedule, tweak=0x0123456789abcdef)
+            sage: blink = BLINK_CVL(64, 64, key_schedule=ks, key=key)
+            sage: hex(vec_to_int(blink(int_to_vec(0, 64))))
+            '0xa4a0d10502be846e'
+
+            sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa1
+            sage: ks = partial(blink_key_schedule, t=128,
+            ....:   tweak=0x0123456789abcdef0123456789abcdef)
+            sage: blink = BLINK_CVL(64, 128, key_schedule=ks, key=key)
+            sage: hex(vec_to_int(blink(int_to_vec(0, 64))))
+            '0x743e142f17caaae1'
+
+            sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa15e2b66350517f80f2961c648d578bae174d70cb769c30a45cc40300fe8a342ca57a0bd0251ae39b621b8f104904374bbd6a102e234a664e421b8f104904374bbd6a102d888a666e4
+            sage: ks = partial(blink_key_schedule, n=128, t=128,
+            ....:   tweak=0x0123456789abcdef0123456789abcdef)
+            sage: blink = BLINK_CVL(128, 128, key_schedule=ks, key=key)
+            sage: hex(vec_to_int(blink(int_to_vec(0, 128))))
+            '0xb722eef350bb182074a6ff13c967a593'
+
+            sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa15e2b66350517f80f2961c648d578bae174d70cb769c30a45cc40300fe8a342ca57a0bd0251ae39b621b8f104904374bbd6a102e234a664e421b8f104904374bbd6a102d888a666e4
+            sage: ks = partial(blink_key_schedule, n=128, t=256,
+            ....:   tweak=0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef)
+            sage: blink = BLINK_CVL(128, 256, key_schedule=ks, key=key)
+            sage: hex(vec_to_int(blink(int_to_vec(0, 128))))
+            '0x20705a38e00412165bdabcac1dcbdec2'
+
+        The Blink-128A/B variants have a 160-byte key, which has to be
+        specified by ``key_bytes`` (both for the cipher, as it determines
+        the round numbers and constants, and for the key schedule)::
+
+            sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa15e2b66350517f80f2961c648d578bae174d70cb769c30a45cc40300fe8a342ca57a0bd0251ae39b621b8f104904374bbd6a102e234a664e421b8f104904374bbd6a102d888a666e428962a4c96893eda752c17026a6395c2d6963be43b2fc10813d73f5a4a48d28d
+            sage: ks = partial(blink_key_schedule, n=128, t=128, key_bytes=160,
+            ....:   tweak=0x0123456789abcdef0123456789abcdef)
+            sage: blink = BLINK_CVL(128, 128, key_bytes=160, key_schedule=ks, key=key)
+            sage: hex(vec_to_int(blink(int_to_vec(0, 128))))
+            '0x82449f141c183601195b5046eac2b026'
+
+            sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa15e2b66350517f80f2961c648d578bae174d70cb769c30a45cc40300fe8a342ca57a0bd0251ae39b621b8f104904374bbd6a102e234a664e421b8f104904374bbd6a102d888a666e428962a4c96893eda752c17026a6395c2d6963be43b2fc10813d73f5a4a48d28d
+            sage: ks = partial(blink_key_schedule, n=128, t=256, key_bytes=160,
+            ....:   tweak=0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef)
+            sage: blink = BLINK_CVL(128, 256, key_bytes=160, key_schedule=ks, key=key)
+            sage: hex(vec_to_int(blink(int_to_vec(0, 128))))
+            '0x8dc41b223bc8cd9923b1297dd27583fc'
+
+        Explicit round keys can be passed via
+        :class:`civerly.keyschedule.DefaultKeySchedule_CVL`::
+
+            sage: from civerly.keyschedule import DefaultKeySchedule_CVL
+            sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa1
+            sage: rks = blink_key_schedule(key, tweak=0x0123456789abcdef)
+            sage: blink = BLINK_CVL(
+            ....:   64, 64, key_schedule=DefaultKeySchedule_CVL(64, 15), key=rks)
+            sage: hex(vec_to_int(blink(int_to_vec(0, 64))))
+            '0xa4a0d10502be846e'
+
+        Reduced-round instances can be built by passing ``a`` and ``b``
+        (which count *keyed* rounds only; the middle tweak stages ``h0`` /
+        center / ``h1`` are always present)::
+
+            sage: from civerly.cipher_implementations.blink import BLINK_CVL
+            sage: blink = BLINK_CVL(64, 64, a=1, b=1)
+            sage: blink.is_valid
+            True
+            sage: blink.R
+            8
+
+        The key schedule then has to be given the same ``a`` and ``b``::
+
+            sage: ks = partial(blink_key_schedule, tweak=0x0123456789abcdef, a=1, b=1)
+            sage: blink = BLINK_CVL(64, 64, key_schedule=ks, key=key, a=1, b=1)
+            sage: len(blink._rk_components) == len(ks(key)) == 9
+            True
+
+        Model the smallest reduced instance (``a = b = 0``, i.e. only the
+        four middle S-box layers) with SAT::
+
+            sage: from civerly.cipher_implementations.blink import BLINK_CVL
+            sage: from civerly.model_options import *
+            sage: import tempfile
+            sage: blink = BLINK_CVL(64, 64, a=0, b=0, name="blink-64a")
+            sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - cryptominisat
+            ....:   model_options = MODEL_OPTIONS(
+            ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
+            ....:     optimization=OPTIMIZATION.SAT,
+            ....:     granularity=GRANULARITY.BITWISE,
+            ....:     linear_layer_modeling=LINEAR_LAYER_MODELING.MORE_DUMMIES,
+            ....:     sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
+            ....:     sat_solver=CRYPTOMINISAT_CVL(),
+            ....:     logic_minimizer=ESPRESSO_CVL(),
+            ....:     solve_range=(30, 40),
+            ....:     path=Path(tmpdir))
+            ....:   blink.analyse(model_options)
+            5248 variables and 14593 clauses were written to ...
+            32
+        """
         assert n in [64, 128], f"Block size must be 64 or 128, not {n}!"
         assert t in [64, 128, 256], f"Tweak size {t} not supported!"
+        if name is None:
+            name = f"Blink-{n}"
+        if key_bytes is None:
+            key_bytes = (n // 8) * (ra_rb_from_n_t(n, t) + 2)
 
         state_bytes, tweak_bytes, ra, rb, pbox, rc, rc_prime = _variant_config(
-            n,
-            t,
-            (key.bit_length() + 7) // 8
-            if key
-            else (n // 8) * (ra_rb_from_n_t(n, t) + 2),
+            n, t, key_bytes
         )
 
-        # Determine whether we are in slicing mode or legacy reduced-round mode.
-        slicing = start is not None
-        # Total number of S-box layers for slicing: keyed rounds plus the
-        # four structural middle S-box layers (h0, the two S-boxes in hxor,
-        # and the h1 S-box).
-        total_sbox_rounds = 2 * (ra + rb) + 4
-        if slicing:
-            assert end is not None, "end must be provided when start is set"
-            assert 1 <= start <= end <= total_sbox_rounds, (
-                f"start={start}, end={end} are "
-                f"out of range for this variant (1..{total_sbox_rounds})"
-            )
-            if include_w0 is None:
-                include_w0 = start == 1
-            if include_w1 is None:
-                include_w1 = end == total_sbox_rounds
-        else:
-            if a is None:
-                a = ra
-            if b is None:
-                b = rb
+        a, b = _check_rounds(a, b, ra, rb)
+        R = 2 * (a + b) + 4
 
-            assert a >= 0 and b >= 0, "a and b must be non-negative"
-            assert a + b <= ra + rb, (
-                f"a({a}) + b({b}) exceeds available round keys/constants "
-                f"for this variant (max {ra + rb})"
-            )
-            if include_w0 is None:
-                include_w0 = True
-            if include_w1 is None:
-                include_w1 = True
+        state_nibbles = state_bytes * 2
+        word = 4  # nibble
 
-        # Eagerly evaluate the key schedule. The reference treats the master
-        # key and tweak in LSB-first byte order.
-        key_bytes = state_bytes * (ra + rb + 2)
-        master_key = [(key >> (8 * i)) & 0xFF for i in range(key_bytes)]
-        tweak_lst = [(tweak >> (8 * i)) & 0xFF for i in range(tweak_bytes)]
-        rk, w, h = _generate_round_key(
-            master_key, tweak_lst, state_bytes, tweak_bytes, key_bytes
+        super().__init__(
+            word,
+            state_nibbles,
+            state_nibbles,
+            R=R,
+            key_schedule=key_schedule,
+            key=key,
+            name=name,
         )
 
-        # Convert every constant to a single integer (LSB-first bytes).
-        rk_int = [_bytes_to_int(rk[r]) for r in range(ra + rb)]
-        w0_int = _bytes_to_int(w[0])
-        w1_int = _bytes_to_int(w[1])
-        h0_int = _bytes_to_int(h[0])
-        h1_int = _bytes_to_int(h[1])
+        # Fixed round constants (LSB-first bytes -> integer).
         rc_int = [_bytes_to_int(rc[r]) for r in range(ra + rb)]
         rc_prime_int = [_bytes_to_int(rc_prime[r]) for r in range(ra + rb)]
-        h_xor_int = h0_int ^ h1_int
 
         # ---- Build the graph ------------------------------------------------
         # Blink works on nibbles (4-bit words). We use ``WordSBoxCipher`` with
         # ``wordsize = 4`` so that wordwise MILP modeling stays available while
         # avoiding the ``AESlike`` column-major / Blink row-major transpose
         # mismatch. MixColumns is a single full-state LinearLayer.
-        state_nibbles = state_bytes * 2
-        word = 4  # nibble
-
-        cipher = WordSBoxCipher(word, state_nibbles, state_nibbles, name=name)
 
         # SubCells: S-box applied to every nibble.
         sbox = SBox_CVL(SBOX, name="SBox")
@@ -1406,183 +1499,70 @@ class BLINK_CVL:
         )
         bwd_round.add_output([(node, (i, i)) for i in range(state_nibbles)])
 
-        # ----- Helper: a single (S, M, AK(c)) middle stage ----------------
-        def middle_stage(cipher_parent, in_node, const, label):
-            node = cipher_parent.add_subcipher(
-                subcells, [(in_node, (i, i)) for i in range(state_nibbles)]
+        # ----- Helpers adding stages to ``self`` ---------------------------
+        # Every key XOR is built with constant 0 and collected (in cipher
+        # order) in ``self._rk_components``; its value is set by
+        # ``set_round_keys``.
+        self._rk_components = []
+
+        def add(sub, in_node):
+            return self.add_subcipher(
+                sub, [(in_node, (i, i)) for i in range(state_nibbles)]
             )
-            node = cipher_parent.add_subcipher(
-                mixcolumns, [(node, (i, i)) for i in range(state_nibbles)]
-            )
-            node = cipher_parent.add_subcipher(
-                rk_xor(const), [(node, (i, i)) for i in range(state_nibbles)]
-            )
+
+        def add_key(in_node):
+            node = add(rk_xor(0), in_node)
+            self._rk_components.append(self.nodes[node])
+            return node
+
+        def add_fwd_round(in_node, r):
+            node = add(fwd_round, in_node)
+            self._rk_components.append(self.nodes[node].nodes[fwd_rk])
+            self.nodes[node].nodes[fwd_rc].const = rc_int[r]
+            return node
+
+        def add_bwd_round(in_node, r):
+            node = add(bwd_round, in_node)
+            self.nodes[node].nodes[bwd_rc].const = rc_prime_int[r]
+            self._rk_components.append(self.nodes[node].nodes[bwd_rk])
             return node
 
         # ----- Assemble the cipher ----------------------------------------
-        node = cipher.IN
-        if include_w0:
-            node = cipher.add_subcipher(
-                rk_xor(w0_int), [(node, (i, i)) for i in range(state_nibbles)]
-            )
+        # whitening w0
+        node = add_key(self.IN)
+        # a forward keyed rounds
+        for r in range(a):
+            node = add_fwd_round(node, r)
+        # middle: S, M, AK(h0), P
+        node = add(subcells, node)
+        node = add(mixcolumns, node)
+        node = add_key(node)
+        node = add(perm, node)
+        # b forward keyed rounds
+        for r in range(b):
+            node = add_fwd_round(node, a + r)
+        # middle: S, M, AK(h0^h1), S
+        node = add(subcells, node)
+        node = add(mixcolumns, node)
+        node = add_key(node)
+        node = add(subcells, node)
+        # b backward keyed rounds
+        for r in range(b):
+            node = add_bwd_round(node, r)
+        # middle: P^-1, AK(h1), M, S
+        node = add(inv_perm, node)
+        node = add_key(node)
+        node = add(mixcolumns, node)
+        node = add(subcells, node)
+        # a backward keyed rounds
+        for r in range(a):
+            node = add_bwd_round(node, b + r)
+        # whitening w1
+        node = add_key(node)
+        self.add_output([(node, (i, i)) for i in range(state_nibbles)])
 
-        if not slicing:
-            # ----- Legacy reduced-round assembly ----------------------------
-            # a forward keyed rounds
-            for r in range(a):
-                node = cipher.add_subcipher(
-                    fwd_round, [(node, (i, i)) for i in range(state_nibbles)]
-                )
-                cipher.nodes[node].nodes[fwd_rk].const = rk_int[r]
-                cipher.nodes[node].nodes[fwd_rc].const = rc_int[r]
-            # middle: S, M, AK(h0), P
-            node = middle_stage(cipher, node, h0_int, "h0")
-            node = cipher.add_subcipher(
-                perm, [(node, (i, i)) for i in range(state_nibbles)]
-            )
-            # b forward keyed rounds
-            for r in range(b):
-                node = cipher.add_subcipher(
-                    fwd_round, [(node, (i, i)) for i in range(state_nibbles)]
-                )
-                cipher.nodes[node].nodes[fwd_rk].const = rk_int[a + r]
-                cipher.nodes[node].nodes[fwd_rc].const = rc_int[a + r]
-            # middle: S, M, AK(h0^h1), S
-            node = middle_stage(cipher, node, h_xor_int, "hxor")
-            node = cipher.add_subcipher(
-                subcells, [(node, (i, i)) for i in range(state_nibbles)]
-            )
-            # b backward keyed rounds
-            for r in range(b):
-                node = cipher.add_subcipher(
-                    bwd_round, [(node, (i, i)) for i in range(state_nibbles)]
-                )
-                cipher.nodes[node].nodes[bwd_rc].const = rc_prime_int[r]
-                cipher.nodes[node].nodes[bwd_rk].const = rk_int[r]
-            # middle: P^-1, AK(h1), M, S
-            node = cipher.add_subcipher(
-                inv_perm, [(node, (i, i)) for i in range(state_nibbles)]
-            )
-            node = cipher.add_subcipher(
-                rk_xor(h1_int), [(node, (i, i)) for i in range(state_nibbles)]
-            )
-            node = cipher.add_subcipher(
-                mixcolumns, [(node, (i, i)) for i in range(state_nibbles)]
-            )
-            node = cipher.add_subcipher(
-                subcells, [(node, (i, i)) for i in range(state_nibbles)]
-            )
-            # a backward keyed rounds
-            for r in range(a):
-                node = cipher.add_subcipher(
-                    bwd_round, [(node, (i, i)) for i in range(state_nibbles)]
-                )
-                cipher.nodes[node].nodes[bwd_rc].const = rc_prime_int[b + r]
-                cipher.nodes[node].nodes[bwd_rk].const = rk_int[b + r]
-        else:
-            # ----- Round-sliced assembly ------------------------------------
-            # We number every S-box layer as a round. The sequence of
-            # S-box layers for the full cipher is:
-            #
-            #   1..a              : forward keyed rounds
-            #   a+1               : h0 middle stage (S, M, AK(h0))
-            #   a+2 .. a+b+1      : forward inner keyed rounds
-            #   a+b+2             : first S-box of hxor stage
-            #   a+b+3             : second S-box of hxor stage
-            #   a+b+4 .. a+2b+3   : backward inner keyed rounds
-            #   a+2b+4            : h1 middle stage S-box (P^-1, AK(h1), M, S)
-            #   a+2b+5 .. 2a+2b+4 : backward outer keyed rounds
-            #
-            # If the slice starts inside a multi-S-box middle stage, it is
-            # built from that S-box forward (the preceding operations of the
-            # stage are omitted). If the slice ends inside such a stage, the
-            # trailing operations are omitted and the slice terminates after
-            # that S-box.
-            for r in range(start, end + 1):
-                if 1 <= r <= ra:
-                    # Forward outer round
-                    idx = r - 1
-                    node = cipher.add_subcipher(
-                        fwd_round, [(node, (i, i)) for i in range(state_nibbles)]
-                    )
-                    cipher.nodes[node].nodes[fwd_rk].const = rk_int[idx]
-                    cipher.nodes[node].nodes[fwd_rc].const = rc_int[idx]
-                elif r == ra + 1:
-                    # h0 middle stage (always followed by the permutation
-                    # that leads to the next round)
-                    node = middle_stage(cipher, node, h0_int, "h0")
-                    node = cipher.add_subcipher(
-                        perm, [(node, (i, i)) for i in range(state_nibbles)]
-                    )
-                elif ra + 2 <= r <= ra + rb + 1:
-                    # Forward inner round
-                    idx = r - 2
-                    node = cipher.add_subcipher(
-                        fwd_round, [(node, (i, i)) for i in range(state_nibbles)]
-                    )
-                    cipher.nodes[node].nodes[fwd_rk].const = rk_int[idx]
-                    cipher.nodes[node].nodes[fwd_rc].const = rc_int[idx]
-                elif r == ra + rb + 2:
-                    # First S-box of the hxor stage: SubCells only.
-                    node = cipher.add_subcipher(
-                        subcells, [(node, (i, i)) for i in range(state_nibbles)]
-                    )
-                    if r < end:
-                        node = cipher.add_subcipher(
-                            mixcolumns, [(node, (i, i)) for i in range(state_nibbles)]
-                        )
-                        node = cipher.add_subcipher(
-                            rk_xor(h_xor_int),
-                            [(node, (i, i)) for i in range(state_nibbles)],
-                        )
-                elif r == ra + rb + 3:
-                    # Second S-box of the hxor stage
-                    node = cipher.add_subcipher(
-                        subcells, [(node, (i, i)) for i in range(state_nibbles)]
-                    )
-                elif ra + rb + 4 <= r <= ra + 2 * rb + 3:
-                    # Backward inner round
-                    idx = r - (ra + rb + 4)
-                    node = cipher.add_subcipher(
-                        bwd_round, [(node, (i, i)) for i in range(state_nibbles)]
-                    )
-                    cipher.nodes[node].nodes[bwd_rc].const = rc_prime_int[idx]
-                    cipher.nodes[node].nodes[bwd_rk].const = rk_int[idx]
-                elif r == ra + 2 * rb + 4:
-                    # h1 middle stage S-box (P^-1, AK(h1), M, S)
-                    node = cipher.add_subcipher(
-                        inv_perm, [(node, (i, i)) for i in range(state_nibbles)]
-                    )
-                    node = cipher.add_subcipher(
-                        rk_xor(h1_int), [(node, (i, i)) for i in range(state_nibbles)]
-                    )
-                    node = cipher.add_subcipher(
-                        mixcolumns, [(node, (i, i)) for i in range(state_nibbles)]
-                    )
-                    node = cipher.add_subcipher(
-                        subcells, [(node, (i, i)) for i in range(state_nibbles)]
-                    )
-                else:
-                    # Backward outer round
-                    idx = r - (ra + rb + 5)
-                    node = cipher.add_subcipher(
-                        bwd_round, [(node, (i, i)) for i in range(state_nibbles)]
-                    )
-                    cipher.nodes[node].nodes[bwd_rc].const = rc_prime_int[idx]
-                    cipher.nodes[node].nodes[bwd_rk].const = rk_int[idx]
-
-        if include_w1:
-            node = cipher.add_subcipher(
-                rk_xor(w1_int), [(node, (i, i)) for i in range(state_nibbles)]
-            )
-        cipher.add_output([(node, (i, i)) for i in range(state_nibbles)])
-
-        self.blink_cipher = cipher
-
-    def __new__(cls, *args, **kwargs):
-        instance = super().__new__(cls)
-        instance.__init__(*args, **kwargs)
-        return instance.blink_cipher
+        if key_schedule is not None and key is not None:
+            self.set_round_keys(key)
 
 
 def ra_rb_from_n_t(n, t):

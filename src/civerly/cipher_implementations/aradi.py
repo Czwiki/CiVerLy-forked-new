@@ -6,13 +6,14 @@ follows the specification in the project documentation:
 
 - a 4-bit S-box applied in parallel across the 32 bit positions,
 - a word-wise linear layer on each 32-bit word,
-- and explicit 128-bit round keys for each round plus a post-add.
+- and a 128-bit round key added before each round plus a post-whitening key.
 """
 
 from sage.crypto.sbox import SBox
 from sage.matrix.constructor import Matrix as matrix
 from sage.rings.finite_rings.finite_field_constructor import GF
 
+from civerly.cipher_implementations.base import CipherImplementation_CVL
 from civerly.component import LinearLayer_CVL, RoundkeyXOR_CVL, SBox_CVL
 from civerly.sboxcipher import SBoxCipher
 from civerly.util import int_to_vec
@@ -108,18 +109,43 @@ def _keyschedule_step(input_state, i):
     return perm
 
 
-def _aradi_key_schedule(master_key):
+def aradi_key_schedule(master_key):
     r"""
-    Expand a 256-bit ARADI master key into 17 128-bit round keys.
+    Expand a 256-bit ARADI master key into 128-bit round keys.
 
     INPUT:
 
-        - ``master_key`` -- list or tuple of 8 integers; The master key
-          words, each fitting in 32 bits.
+        - ``master_key`` -- list or tuple of 8 integers, or integer; The
+          master key, either as eight 32-bit words or as a 256-bit integer
+          whose most significant 32 bits are the first word.
 
-    OUTPUT: A list of 17 integers, each encoding one 128-bit round key
-    as ``w || x || y || z`` in big-endian layout.
+    OUTPUT: A list of 17 integers (round keys ``0, ..., 15`` followed by
+    the post-whitening key),
+    each encoding one 128-bit round key as ``w || x || y || z`` in
+    big-endian layout.
+
+    EXAMPLES::
+
+        sage: from civerly.cipher_implementations.aradi import aradi_key_schedule
+        sage: key = [
+        ....:   0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C,
+        ....:   0x13121110, 0x17161514, 0x1B1A1918, 0x1F1E1D1C,
+        ....: ]
+        sage: rks = aradi_key_schedule(key)
+        sage: len(rks), hex(rks[0]), hex(rks[16])
+        (17, '0x3020100070605040b0a09080f0e0d0c', '0xa443053b69322a8ee8abfb4f41cf0ca8')
+        sage: aradi_key_schedule(
+        ....:   0x03020100070605040B0A09080F0E0D0C13121110171615141B1A19181F1E1D1C
+        ....: ) == rks
+        True
     """
+    if not hasattr(master_key, "__iter__"):
+        if not 0 <= master_key < (1 << 256):
+            raise ValueError(
+                f"ARADI master key does not fit into 256 bits: {master_key}"
+            )
+        master_key = [(master_key >> (32 * (7 - i))) & _MASK32 for i in range(8)]
+    master_key = list(master_key)
     if len(master_key) != 8:
         raise ValueError(
             f"ARADI master key must contain 8 words, got {len(master_key)}"
@@ -161,53 +187,52 @@ def _aradi_key_schedule(master_key):
     return round_keys
 
 
-class ARADI_CVL:
+class ARADI_CVL(CipherImplementation_CVL, SBoxCipher):
     def __init__(
         self,
-        R=None,
-        rks=None,
+        R=16,
+        key_schedule=None,
         key=None,
-        name=None,
-        round_start=0,
-        round_end=None,
+        name="ARADI",
     ):
         r"""
-        Implement ARADI in CiVerLy.
+        The CiVerLy implementation of ARADI.
 
         ARADI is a 128-bit SPN with four 32-bit state words. The cipher
         is built as a layered DAG where each round is an explicit
         ``SBoxCipher`` subcipher, making round boundaries easy to
-        identify for slicing and analysis tools.
+        identify for analysis tools.
 
         INPUT:
 
-            - ``rks`` -- list (optional); Explicit 128-bit round keys.
-              Must have length ``actual_rounds + 1`` for a slice ending at
-              the cipher's final round, or ``actual_rounds`` otherwise.
-              Mutually exclusive with ``key``.
+            - ``R`` -- integer (default: ``16``); Number of rounds, starting
+              at round 0. The post-whitening key addition is always appended
+              after the last round.
 
-            - ``key`` -- list (optional); The 256-bit ARADI master key as a
-              list of eight 32-bit words.  The key schedule is expanded
-              automatically to produce the round keys.  Mutually exclusive
-              with ``rks``.
+            - ``key_schedule`` -- callable or
+              :class:`civerly.keyschedule.KeySchedule` (optional); Key
+              schedule used to derive round keys from ``key`` via
+              ``set_round_keys``. Pass :func:`aradi_key_schedule` to use the
+              real ARADI key schedule (for reduced ``R`` the leading round
+              keys are used), or
+              :class:`civerly.keyschedule.DefaultKeySchedule_CVL` to pass
+              explicit 128-bit round keys: ``R + 1`` of them, one per round
+              plus the post-whitening key. Defaults to ``None`` (no key
+              schedule, all-zero round keys).
 
-            - ``name`` -- string (optional); The name of the cipher.
+            - ``key`` -- list of integers or integer (optional); The 256-bit
+              master key (eight 32-bit words, or a 256-bit integer) passed to
+              ``key_schedule``, immediately expanded and injected via
+              ``set_round_keys`` when both are given. Has no effect when
+              ``key_schedule`` is ``None``. When using
+              :class:`civerly.keyschedule.DefaultKeySchedule_CVL`, this is the
+              list of round keys (round key 0 first, post-whitening key last).
 
-            - ``round_start`` -- integer (optional, default ``0``); Index
-              of the first round to include.  When this is not ``0``,
-              ``round_end`` must be given and ``R`` must be ``None``.
+            - ``name`` -- string (default: ``"ARADI"``); The name of the
+              cipher.
 
-            - ``round_end`` -- integer (optional, default ``None``); Index
-               of the last round to include.  When given, ``R`` must be
-               ``None`` and the number of rounds is computed as
-               ``round_end - round_start + 1``.
-
-             - ``R`` -- integer (optional); Number of rounds of the
-               underlying full cipher.  Only used when ``round_start``
-               or ``round_end`` is given, to decide whether the slice
-               reaches the cipher's final round and therefore needs the
-               post-whitening key addition.  Defaults to ``16`` both
-               here and in non-slicing mode.
+        This cipher is "plug-and-play" usable, i.e. it can be directly used
+        when imported.
 
         ROUND STRUCTURE:
 
@@ -217,29 +242,15 @@ class ARADI_CVL:
             with shift parameters ``(11,8,14)``, ``(10,9,11)``,
             ``(9,4,14)``, and ``(8,9,7)``.
 
-            The first round of the slice is just the ordinary round
-            keyed with ``rks[round_index - round_start]``.  A
-            post-whitening key addition is only appended when
-            ``round_end`` equals the last round of the full cipher
-            (``R - 1`` for a freshly constructed cipher, or the last
-            round of the ``R`` supplied in slicing mode).  This
-            allows constructing a slice ``round_start..round_end``
-            without unwanted extra key additions.
+            After the last round, a post-whitening key is added.
 
+        TESTS:
 
-            Round subcipher node indices are stored in
-            ``cipher.round_outputs`` (in order) so that external tools
-            can slice the cipher graph between any two round
-            boundaries. Each entry is the main-cipher node index of
-            the corresponding round subcipher, so a slice from round
-            ``a`` to ``b`` can be assembled by deep-copying
-            ``cipher.nodes[cipher.round_outputs[i]]`` for
-            ``i = a .. b`` and rewiring them into a new
-            ``SBoxCipher``.
-
-        TESTS::
+        Test vector with explicit round keys, passed via
+        :class:`civerly.keyschedule.DefaultKeySchedule_CVL`::
 
             sage: from civerly.cipher_implementations.aradi import ARADI_CVL
+            sage: from civerly.keyschedule import DefaultKeySchedule_CVL
             sage: from civerly.util import int_to_vec, vec_to_int
             sage: # Round keys from the reference test vector
             sage: rks = [
@@ -261,25 +272,46 @@ class ARADI_CVL:
             ....:   0x71c5c0468ab9aa02d8fb0856b7dfa119,
             ....:   0xa443053b69322a8ee8abfb4f41cf0ca8,
             ....: ]
-            sage: aradi = ARADI_CVL(rks=rks)
+            sage: aradi = ARADI_CVL(
+            ....:   key_schedule=DefaultKeySchedule_CVL(128, 17), key=rks)
             sage: hex(vec_to_int(aradi(int_to_vec(0x0, 128))))
             '0x3f09abf400e3bd7403260defb7c53912'
 
-            sage: # Constructing the same cipher from the master key
+        The same cipher, constructed from the master key with the real key
+        schedule::
+
+            sage: from civerly.cipher_implementations.aradi \
+            ....:   import aradi_key_schedule
             sage: key = [
             ....:   0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C,
             ....:   0x13121110, 0x17161514, 0x1B1A1918, 0x1F1E1D1C,
             ....: ]
-            sage: aradi_from_key = ARADI_CVL(key=key)
+            sage: aradi_from_key = ARADI_CVL(key_schedule=aradi_key_schedule, key=key)
             sage: hex(vec_to_int(aradi_from_key(int_to_vec(0x0, 128))))
             '0x3f09abf400e3bd7403260defb7c53912'
+            sage: aradi_from_key.set_round_keys([0] * 8)
+            sage: aradi_from_key(int_to_vec(0x0, 128)) == \
+            ....:   ARADI_CVL(key_schedule=aradi_key_schedule, key=0)(
+            ....:     int_to_vec(0x0, 128))
+            True
+
+        A reduced-round instance uses the leading round keys of the key
+        schedule::
+
+            sage: aradi_red = ARADI_CVL(
+            ....:   R=2, key_schedule=aradi_key_schedule, key=key)
+            sage: len(aradi_red._rk_components)
+            3
+            sage: [c.const for c in aradi_red._rk_components] == \
+            ....:   aradi_key_schedule(key)[:3]
+            True
 
         Analyse ARADI with MILP (matching https://eprint.iacr.org/2024/1324.pdf)::
 
             sage: # optional - scip # doctest: +ELLIPSIS
             ....: from civerly.cipher_implementations.aradi import ARADI_CVL
             ....: from civerly.model_options import *
-            ....: aradi_small = ARADI_CVL(R=2, rks=[0x0]*3)
+            ....: aradi_small = ARADI_CVL(R=2)
             ....: import tempfile
             ....: from pathlib import Path
             ....: with tempfile.TemporaryDirectory() as tmpdir:
@@ -300,69 +332,7 @@ class ARADI_CVL:
             8
             True
         """
-        rks_provided = rks is not None
-        if rks is None:
-            rks = []
-
-        if name is None:
-            name = "ARADI"
-
-        if round_start != 0 or round_end is not None:
-            if round_end is None:
-                raise ValueError(
-                    "round_end must be specified when round_start is not 0."
-                )
-            actual_rounds = round_end - round_start + 1
-            if actual_rounds <= 0:
-                raise ValueError(
-                    f"Invalid round range: round_start={round_start}, round_end={round_end}"
-                )
-            # When slicing, ``R`` denotes the number of rounds of the
-            # underlying full cipher.  If it is omitted, default to the
-            # standard 16 rounds.
-            full_rounds = R if R is not None else 16
-            if full_rounds <= round_end:
-                raise ValueError("R must be a positive integer greater than round_end.")
-        else:
-            if R is None:
-                R = 16
-            actual_rounds = R
-            round_end = round_start + R - 1
-            full_rounds = R
-
-        # ARADI uses one 128-bit key per round.  A post-whitening key is
-        # appended only when the requested slice ends at the cipher's final
-        # round (``round_end == full_rounds - 1``).  When ``round_start`` is
-        # not ``0`` no pre-whitening is performed; the first round of the
-        # slice is simply keyed with ``rks[0]``.
-        include_post_whiten = round_end + 1 == full_rounds
-        expected_rks_count = actual_rounds + (1 if include_post_whiten else 0)
-
-        # NOTE: this implements the application of the key schedule?
-        if key is not None:
-            if rks_provided:
-                raise ValueError(
-                    "ARADI_CVL accepts either explicit round keys via `rks` "
-                    "or a master key via `key`, not both."
-                )
-            if full_rounds > 16:
-                raise ValueError("When `key` is provided, `R` must not exceed 16.")
-            full_rks = _aradi_key_schedule(key)
-            needed = expected_rks_count
-            if round_start + needed > len(full_rks):
-                raise ValueError(
-                    "Insufficient round keys derived from the master key "
-                    f"for the requested slice ({round_start}..{round_end})."
-                )
-            rks = full_rks[round_start : round_start + needed]
-
-        if len(rks) != expected_rks_count:
-            raise ValueError(
-                f"ARADI requires exactly {expected_rks_count} round keys "
-                f"for rounds {round_start}..{round_end}, got {len(rks)}"
-            )
-
-        cipher = SBoxCipher(128, 128, name=name)
+        super().__init__(128, 128, R=R, key_schedule=key_schedule, key=key, name=name)
 
         sbox = SBox_CVL(SBox(_aradi_sbox_table()), name="SBox")
         sbox_layer = SBoxCipher(128, 128, name="SBoxLayer")
@@ -410,16 +380,12 @@ class ARADI_CVL:
                 )
             linear_layers.append(linear_layer)
 
-        node = cipher.IN
-        round_outputs = []
+        node = self.IN
+        rk_nodes = []
 
-        # Post-whitening is appended after the last round only when the slice
-        # ends at the cipher's final round.
-        include_post_whiten = round_end + 1 == full_rounds
-
-        for round_index in range(round_start, round_end + 1):
+        for round_index in range(self.R):
             round_cipher = SBoxCipher(128, 128, name=f"ARADI-round-{round_index}")
-            rk = RoundkeyXOR_CVL(128, rks[round_index - round_start], name="RK")
+            rk = RoundkeyXOR_CVL(128, 0x0, name="RK")
             node_rk = round_cipher.add_subcipher(
                 rk,
                 [(round_cipher.IN, (bit_index, bit_index)) for bit_index in range(128)],
@@ -436,32 +402,22 @@ class ARADI_CVL:
                 [(node_linear, (bit_index, bit_index)) for bit_index in range(128)]
             )
 
-            round_node = cipher.add_subcipher(
+            node = self.add_subcipher(
                 round_cipher,
-                [
-                    (
-                        cipher.IN if round_index == round_start else node,
-                        (bit_index, bit_index),
-                    )
-                    for bit_index in range(128)
-                ],
+                [(node, (bit_index, bit_index)) for bit_index in range(128)],
             )
-            round_outputs.append(round_node)
-            node = round_node
+            rk_nodes.append((node, node_rk))
 
-        if include_post_whiten:
-            post_rk = RoundkeyXOR_CVL(128, rks[actual_rounds], name="PostRK")
-            node = cipher.add_subcipher(
-                post_rk, [(node, (bit_index, bit_index)) for bit_index in range(128)]
-            )
+        self._rk_components = [self.nodes[n].nodes[n_rk] for n, n_rk in rk_nodes]
 
-        cipher.add_output([(node, (bit_index, bit_index)) for bit_index in range(128)])
+        # Post-whitening key addition after the last round.
+        post_rk = RoundkeyXOR_CVL(128, 0x0, name="PostRK")
+        node = self.add_subcipher(
+            post_rk, [(node, (bit_index, bit_index)) for bit_index in range(128)]
+        )
+        self._rk_components.append(self.nodes[node])
 
-        self.cipher = cipher
-        cipher.round_outputs = round_outputs
+        self.add_output([(node, (bit_index, bit_index)) for bit_index in range(128)])
 
-    def __new__(cls, *args, **kwargs):
-        """Return the constructed cipher graph instance."""
-        instance = super().__new__(cls)
-        instance.__init__(*args, **kwargs)
-        return instance.cipher
+        if key_schedule is not None and key is not None:
+            self.set_round_keys(key)

@@ -10,7 +10,8 @@ original sources for licensing and full attribution.
 
 from sage.crypto.sbox import SBox
 
-from civerly.component import SBox_CVL
+from civerly.cipher_implementations.base import CipherImplementation_CVL
+from civerly.component import RoundkeyXOR_CVL, SBox_CVL
 from civerly.sboxcipher import SBoxCipher
 
 PARAMS = {
@@ -88,26 +89,68 @@ def _ir_bits(rounds):
     return table[:rounds]
 
 
-def _fa_sbox(ir_bit, key_bit):
+def _fa_sbox(ir_bit):
     table = []
     for value in range(1 << 5):
         bits = [(value >> (4 - i)) & 1 for i in range(5)]
         output = bits[0] ^ bits[1] ^ (bits[2] & bits[3])
         if ir_bit:
             output ^= bits[4]
-        output ^= key_bit
         table.append(output)
     return SBox(table)
 
 
-def _fb_sbox(key_bit):
+def _fb_sbox():
     table = []
     for value in range(1 << 6):
         bits = [(value >> (5 - i)) & 1 for i in range(6)]
         output = bits[0] ^ bits[1] ^ (bits[2] & bits[3]) ^ (bits[4] & bits[5])
-        output ^= key_bit
         table.append(output)
     return SBox(table)
+
+
+def katan_key_schedule(master_key, variant=32):
+    r"""
+    Generate the KATAN round keys from an 80-bit master key, in the order of
+    the round-key components of :class:`KATAN_CVL`.
+
+    In every step of round ``r`` (0-based), KATAN XORs the key bit
+    ``k_{2r}`` into the output of ``f_a`` and ``k_{2r+1}`` into the output of
+    ``f_b``. :class:`KATAN_CVL` models this with one 2-bit round-key XOR per
+    step, so each round key is the 2-bit integer ``k_{2r} || k_{2r+1}`` (with
+    ``k_{2r}`` as most significant bit). As all steps of a round use the same
+    key bits, KATAN48 and KATAN64 (2 resp. 3 steps per round) repeat each
+    round key 2 resp. 3 times.
+
+    INPUT:
+
+        - ``master_key`` -- integer; the 80-bit master key.
+
+        - ``variant`` -- integer (default: ``32``); the block size of KATAN,
+          one of ``{32, 48, 64}``. Determines the number of steps per round.
+
+    OUTPUT: A list of ``254 * steps`` 2-bit round-key integers, for all 254
+    rounds starting with round 1. A cipher with fewer rounds uses the leading
+    round keys only.
+
+    EXAMPLES::
+
+        sage: from civerly.cipher_implementations.katan import katan_key_schedule
+        sage: katan_key_schedule(0x0123456789abcdef0123)[:6]
+        [3, 0, 1, 0, 2, 0]
+        sage: katan_key_schedule(0x0123456789abcdef0123, variant=48)[:6]
+        [3, 3, 0, 0, 1, 1]
+        sage: len(katan_key_schedule(0x0)), len(katan_key_schedule(0x0, 64))
+        (254, 762)
+    """
+    if variant not in PARAMS:
+        raise ValueError("Unsupported KATAN variant")
+    k = _key_bits(master_key, 254)
+    return [
+        (k[2 * r] << 1) | k[2 * r + 1]
+        for r in range(254)
+        for _ in range(PARAMS[variant]["steps"])
+    ]
 
 
 def reference_katan_encrypt(variant, plaintext_int, key_int, rounds):
@@ -159,7 +202,7 @@ def reference_katan_encrypt(variant, plaintext_int, key_int, rounds):
     return out
 
 
-class KATAN_CVL:
+class KATAN_CVL(CipherImplementation_CVL, SBoxCipher):
     r"""
     The CiVerLy implementation of the KATAN block cipher family.
 
@@ -169,64 +212,73 @@ class KATAN_CVL:
     round.
 
     This implementation is built as an ``SBoxCipher`` and therefore supports
-    bitwise MILP and SAT modeling. The constructor accepts either a total
-    number of rounds ``R`` or an explicit 1-based round range ``(start, end)``
-    for sliceable analysis.
+    bitwise MILP and SAT modeling. Reduced-round versions (always starting
+    with the first round) are obtained via ``R``.
+
+    The key bits are XORed into the outputs of ``f_a`` and ``f_b`` by one 2-bit
+    round-key XOR per step (see :func:`katan_key_schedule`), so the round keys
+    can be injected via ``set_round_keys``.
 
     EXAMPLES:
 
     Encrypt with the three variants (verified against the reference
     implementation)::
 
-        sage: from civerly.cipher_implementations.katan import KATAN_CVL, reference_katan_encrypt
+        sage: from civerly.cipher_implementations.katan import (
+        ....:   KATAN_CVL, katan_key_schedule, reference_katan_encrypt)
         sage: from civerly.util import int_to_vec, vec_to_int
+        sage: from functools import partial
         sage: key = 0x0123456789abcdef0123  # 80-bit example key
-        sage: c32 = KATAN_CVL(variant=32, R=10, key=key)
+        sage: c32 = KATAN_CVL(
+        ....:   variant=32, R=10, key_schedule=katan_key_schedule, key=key)
         sage: pt32 = 0x12345678
-        sage: vec_to_int(c32(int_to_vec(pt32, 32))) == reference_katan_encrypt(32, pt32, key, 10)
+        sage: vec_to_int(c32(int_to_vec(pt32, 32))) == \
+        ....:   reference_katan_encrypt(32, pt32, key, 10)
         True
         sage: vec_to_int(c32(int_to_vec(pt32, 32))) == 0xdb31e2cd
         True
-        sage: c48 = KATAN_CVL(variant=48, R=8, key=key)
+        sage: ks48 = partial(katan_key_schedule, variant=48)
+        sage: c48 = KATAN_CVL(variant=48, R=8, key_schedule=ks48, key=key)
         sage: pt48 = 0x123456789abc
-        sage: vec_to_int(c48(int_to_vec(pt48, 48))) == reference_katan_encrypt(48, pt48, key, 8)
+        sage: vec_to_int(c48(int_to_vec(pt48, 48))) == \
+        ....:   reference_katan_encrypt(48, pt48, key, 8)
         True
         sage: vec_to_int(c48(int_to_vec(pt48, 48))) == 0x51873abc9a78
         True
-        sage: c64 = KATAN_CVL(variant=64, R=6, key=key)
+        sage: ks64 = partial(katan_key_schedule, variant=64)
+        sage: c64 = KATAN_CVL(variant=64, R=6, key_schedule=ks64, key=key)
         sage: pt64 = 0x0123456789abcdef
-        sage: vec_to_int(c64(int_to_vec(pt64, 64))) == reference_katan_encrypt(64, pt64, key, 6)
+        sage: vec_to_int(c64(int_to_vec(pt64, 64))) == \
+        ....:   reference_katan_encrypt(64, pt64, key, 6)
         True
         sage: vec_to_int(c64(int_to_vec(pt64, 64))) == 0x15ff052f37bc14f0
         True
 
-    Slicing by explicit round range yields the same result as the full cipher
-    and can be composed. ``R`` and ``(start, end)`` are mutually exclusive::
+    Explicit round keys can be passed via
+    :class:`civerly.keyschedule.DefaultKeySchedule_CVL` (one 2-bit round key
+    per step, i.e. ``R`` of them for KATAN32)::
 
-        sage: full = KATAN_CVL(variant=32, R=10, key=key)
-        sage: sliced = KATAN_CVL(variant=32, start=1, end=10, key=key)
-        sage: vec_to_int(full(int_to_vec(pt32, 32))) == vec_to_int(sliced(int_to_vec(pt32, 32)))
+        sage: from civerly.keyschedule import DefaultKeySchedule_CVL
+        sage: rks = katan_key_schedule(key)[:10]
+        sage: c32 = KATAN_CVL(
+        ....:   variant=32, R=10, key_schedule=DefaultKeySchedule_CVL(2, 10),
+        ....:   key=rks)
+        sage: hex(vec_to_int(c32(int_to_vec(pt32, 32))))
+        '0xdb31e2cd'
+
+    Without key schedule, all round keys are zero::
+
+        sage: c32 = KATAN_CVL(variant=32, R=10)
+        sage: vec_to_int(c32(int_to_vec(pt32, 32))) == \
+        ....:   reference_katan_encrypt(32, pt32, 0, 10)
         True
-        sage: mid = vec_to_int(KATAN_CVL(variant=32, start=1, end=5, key=key)(int_to_vec(pt32, 32)))
-        sage: mid == 0x46dacf16
+
+    Reduced-round versions use the leading round keys of the key schedule::
+
+        sage: c32 = KATAN_CVL(
+        ....:   variant=32, R=5, key_schedule=katan_key_schedule, key=key)
+        sage: vec_to_int(c32(int_to_vec(pt32, 32))) == 0x46dacf16
         True
-        sage: ct = vec_to_int(KATAN_CVL(variant=32, start=6, end=10, key=key)(int_to_vec(mid, 32)))
-        sage: ct == vec_to_int(full(int_to_vec(pt32, 32)))
-        True
-        sage: ct == 0xdb31e2cd
-        True
-        sage: KATAN_CVL(variant=32, R=10, start=1, end=10, key=key)  # doctest: +IGNORE_EXCEPTION_DETAIL
-        Traceback (most recent call last):
-            ...
-        ValueError: R cannot be combined with an explicit (start, end) range
-        sage: KATAN_CVL(variant=32, start=1, key=key)  # doctest: +IGNORE_EXCEPTION_DETAIL
-        Traceback (most recent call last):
-            ...
-        ValueError: end must be provided when start is given
-        sage: KATAN_CVL(variant=32, end=10, key=key)  # doctest: +IGNORE_EXCEPTION_DETAIL
-        Traceback (most recent call last):
-            ...
-        ValueError: start must be provided when end is given
 
     TESTS::
 
@@ -240,7 +292,7 @@ class KATAN_CVL:
         sage: from civerly.util import suppress_output
         sage: import tempfile
         sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - cryptominisat
-        ....:   c = KATAN_CVL(variant=32, R=71, key=0)
+        ....:   c = KATAN_CVL(variant=32, R=71)
         ....:   model_options = MODEL_OPTIONS(
         ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
         ....:     optimization=OPTIMIZATION.SAT,
@@ -250,7 +302,7 @@ class KATAN_CVL:
         ....:     sat_solver=CRYPTOMINISAT_CVL(),
         ....:     path=Path(tmpdir))
         ....:   c.analyse(model_options)
-        1399 variables and 3293 clauses were written to ...
+        1683 variables and 3861 clauses were written to ...
         30
 
     Bitwise MILP modeling is also supported.  The following example is tagged
@@ -262,7 +314,7 @@ class KATAN_CVL:
         sage: from civerly.util import suppress_output
         sage: import tempfile
         sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - scip
-        ....:   c = KATAN_CVL(variant=32, R=15, key=0)
+        ....:   c = KATAN_CVL(variant=32, R=15)
         ....:   model_options = MODEL_OPTIONS(
         ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
         ....:     optimization=OPTIMIZATION.MILP,
@@ -273,100 +325,113 @@ class KATAN_CVL:
         ....:   c.analyse(model_options)
         ....:   trail = c.get_trail(model_options)
         ....:   "Unnamed Component" not in str(trail)
-        447 variables and 636 constraints were written to ...
+        507 variables and 696 constraints were written to ...
         2
         True
     """
 
-    def __init__(self, variant=32, R=254, start=None, end=None, key=0, name=None):
+    def __init__(
+        self,
+        variant=32,
+        R=254,
+        key_schedule=None,
+        key=None,
+        name=None,
+    ):
         r"""
         Build a KATAN cipher instance.
 
         INPUT:
 
-            - ``variant`` -- integer; The block size of KATAN. It is required
-              that ``variant`` is one of ``{32, 48, 64}``.
+            - ``variant`` -- integer (default: ``32``); The block size of
+              KATAN. It is required that ``variant`` is one of
+              ``{32, 48, 64}``.
 
-            - ``R`` -- integer; Number of rounds. Defaults to 254.
+            - ``R`` -- integer (default: ``254``); Number of rounds, starting
+              with the first round.
 
-            - ``start`` -- integer (optional); First round of a slice (1-based).
-              Must be provided together with ``end`` and is mutually exclusive
-              with ``R``.
+            - ``key_schedule`` -- callable or
+              :class:`civerly.keyschedule.KeySchedule` (optional); Key
+              schedule used to derive round keys from ``key`` via
+              ``set_round_keys``. Pass :func:`katan_key_schedule` to use the
+              real KATAN key schedule (for KATAN48/64 via
+              ``functools.partial`` with the matching ``variant``), or
+              :class:`civerly.keyschedule.DefaultKeySchedule_CVL` to pass
+              explicit round keys (2 bits each, one per step, i.e.
+              ``R * steps`` of them with ``steps`` = 1, 2, 3 for KATAN32, 48,
+              64). Defaults to ``None`` (no key schedule, all-zero round
+              keys).
 
-            - ``end`` -- integer (optional); Last round of a slice (1-based).
-              Must be provided together with ``start``.
+            - ``key`` -- integer or list of integers (optional); The 80-bit
+              master key passed to ``key_schedule``, immediately expanded and
+              injected via ``set_round_keys`` when both are given. Has no
+              effect when ``key_schedule`` is ``None``. When using
+              :class:`civerly.keyschedule.DefaultKeySchedule_CVL`, this is the
+              list of round keys (round key 0 first).
 
-            - ``key`` -- integer (optional); The 80-bit master key. Defaults to
-              0.
+            - ``name`` -- string (optional); The name of the cipher. Defaults
+              to ``"KATAN<variant>"``.
 
-            - ``name`` -- string (optional); The name of the cipher.
+        This cipher is "plug-and-play" usable, i.e. it can be directly used
+        when imported.
         """
         if variant not in PARAMS:
             raise ValueError("Unsupported KATAN variant")
 
-        if start is not None and end is None:
-            raise ValueError("end must be provided when start is given")
-        if end is not None and start is None:
-            raise ValueError("start must be provided when end is given")
-        if start is not None and end is not None and R != 254:
-            raise ValueError("R cannot be combined with an explicit (start, end) range")
+        if name is None:
+            name = f"KATAN{variant}"
 
         params = PARAMS[variant]
         l1_len = params["l1"]
         l2_len = params["l2"]
         block_size = l1_len + l2_len
 
-        if name is None:
-            if start is not None:
-                name = f"KATAN{variant}-r{start}-{end}"
-            else:
-                name = f"KATAN{variant}"
+        super().__init__(
+            block_size, block_size, R=R, key_schedule=key_schedule, key=key, name=name
+        )
 
-        rounds = range(R) if start is None else range(start - 1, end)
-
-        # The key schedule and IR stream are defined over the full execution
-        # up to ``end`` (round indices are 1-based externally), so derive the
-        # required number of stream bits from ``end``.
-        stream_end = end if end is not None else R
-
-        key_stream = _key_bits(key, stream_end)
-        ir_stream = _ir_bits(stream_end)
-
-        cipher = SBoxCipher(block_size, block_size, name=name)
+        ir_stream = _ir_bits(self.R)
+        fb_sbox = _fb_sbox()
 
         # Each register is tracked as a list of ``(node, bit)`` sources indexed
         # by register bit position (0 = least significant). Shifting a register
         # is then a mere relabelling, so each step only adds the ``fa`` and
-        # ``fb`` S-boxes to the graph. In the state vector, bit 0 is the most
-        # significant bit of L1, followed by L1's lower bits and then L2.
-        L1 = [(cipher.IN, l1_len - 1 - i) for i in range(l1_len)]
-        L2 = [(cipher.IN, block_size - 1 - i) for i in range(l2_len)]
+        # ``fb`` S-boxes and the 2-bit round-key XOR on their outputs to the
+        # graph. In the state vector, bit 0 is the most significant bit of L1,
+        # followed by L1's lower bits and then L2.
+        L1 = [(self.IN, l1_len - 1 - i) for i in range(l1_len)]
+        L2 = [(self.IN, block_size - 1 - i) for i in range(l2_len)]
 
-        for r in rounds:
+        rk_nodes = []
+        for r in range(self.R):
             # all steps of a round use the same key and IR bits
-            fa_sbox = _fa_sbox(ir_stream[r], key_stream[2 * r])
-            fb_sbox = _fb_sbox(key_stream[2 * r + 1])
+            fa_sbox = _fa_sbox(ir_stream[r])
             for s in range(params["steps"]):
                 prefix = f"KATAN{variant}-r{r}-s{s}"
-                fa = cipher.add_subcipher(
+                fa = self.add_subcipher(
                     SBox_CVL(fa_sbox, name=f"{prefix}-fa"),
                     [(L1[p][0], (L1[p][1], i)) for i, p in enumerate(params["fa"])],
                 )
-                fb = cipher.add_subcipher(
+                fb = self.add_subcipher(
                     SBox_CVL(fb_sbox, name=f"{prefix}-fb"),
                     [(L2[p][0], (L2[p][1], i)) for i, p in enumerate(params["fb"])],
                 )
+                # XOR k_{2r} into fa's and k_{2r+1} into fb's output
+                rk = self.add_subcipher(
+                    RoundkeyXOR_CVL(2, 0, name=f"{prefix}-rk"),
+                    [(fa, (0, 0)), (fb, (0, 1))],
+                )
+                rk_nodes.append(rk)
                 # shift towards the MSB, dropping it
-                L1 = [(fb, 0), *L1[:-1]]
-                L2 = [(fa, 0), *L2[:-1]]
+                L1 = [(rk, 1), *L1[:-1]]
+                L2 = [(rk, 0), *L2[:-1]]
 
-        cipher.add_output(
+        self.add_output(
             [(node, (bit, l1_len - 1 - i)) for i, (node, bit) in enumerate(L1)]
             + [(node, (bit, block_size - 1 - i)) for i, (node, bit) in enumerate(L2)]
         )
-        self.cipher = cipher
 
-    def __new__(cls, *args, **kwargs):
-        instance = super().__new__(cls)
-        instance.__init__(*args, **kwargs)
-        return instance.cipher
+        self._rk_components = [self.nodes[n] for n in rk_nodes]
+
+        if key_schedule is not None and key is not None:
+            self.set_round_keys(key)

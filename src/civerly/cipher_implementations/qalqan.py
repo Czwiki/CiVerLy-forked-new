@@ -31,24 +31,18 @@ The nominal round count is *N* (17..29).  Because the first round uses
 XOR whitening and the last round is also XOR whitening, the key schedule
 must yield **N + 1** round keys.
 
-**Round slicing**
-The constructor accepts ``start_round`` / ``end_round`` (0-based, inclusive)
-to build a reduced or sliced cipher:
+**Rounds**
+The rounds are numbered from ``0``:
 
 * Round ``0``            : ``XOR(rk[0]) -> S -> L``   (initial whitening)
 * Round ``i`` (1..N-1)   : ``ADD(rk[i]) -> S -> L``   (middle rounds)
 * Round ``N``            : ``XOR(rk[N])``           (final whitening)
 
-``start_round`` determines which round key is applied first.
-``end_round`` determines the last round key that is applied.
-If ``end_round == N`` the cipher ends with the final whitening XOR;
-otherwise it ends with a middle round ``ADD -> S -> L``.
-
-The older ``R`` parameter is still supported for backward compatibility:
-``R`` requests a cipher consisting of the first ``R`` rounds
-(``start_round = 0``, ``end_round = R-1``), except when ``R`` equals the
-full nominal round count in which case the final whitening round is also
-included (``end_round = N``).
+The constructor parameter ``R`` requests a cipher consisting of the first
+``R`` rounds (rounds ``0, ..., R-1``); the full cipher has ``R = N + 1``
+rounds and ends with the final whitening XOR, a reduced cipher ends with a
+middle round ``ADD -> S -> L``.  ``N`` is determined by the ``key_size``
+parameter (default: 256 bit, i.e. ``N = 17``).
 
 Modeling notes
 --------------
@@ -68,6 +62,7 @@ after reversing the bit order of the state (the reference uses little-endian
 from sage.crypto.sbox import SBox
 
 from civerly.cipher import Cipher
+from civerly.cipher_implementations.base import CipherImplementation_CVL
 from civerly.component import (
     RK_CVL,
     ModAdd_CVL,
@@ -486,360 +481,429 @@ def _qalqan_round_keys(key, rounds=None):
     return keys
 
 
-class QALQAN_CVL:
+
+def _key_to_bytes(master_key, key_size=None):
     r"""
-    The CiVerLy implementation of the Qalqan block cipher.
-    Note that due to limited literature on Qalqan, the test vectors
-    are obtained from a manually written reference implementation.
+    Coerce ``master_key`` (``bytes`` or an integer) into the ``bytes`` form
+    expected by :func:`_qalqan_round_keys`.
+
+    If ``key_size`` (in bits) is given, an integer key is encoded big-endian
+    on exactly ``key_size`` bits and a ``bytes`` key must have that length.
+    Otherwise the length is taken from a ``bytes`` key, and an integer key is
+    padded to at least 256 bit (see :func:`_normalize_key`).
+    """
+    if key_size is None:
+        return _normalize_key(master_key)
+    if key_size % 8:
+        raise ValueError("key_size must be a multiple of 8.")
+    if isinstance(master_key, (bytes, bytearray)):
+        if len(master_key) * 8 != key_size:
+            raise ValueError(
+                f"Key has {len(master_key) * 8} bits, expected {key_size}."
+            )
+        return bytes(master_key)
+    return int(master_key).to_bytes(key_size // 8, "big")
+
+
+def qalqan_round_keys_to_components(round_keys, key_size=256):
+    r"""
+    Convert Qalqan round keys from the reference representation into the
+    representation stored in the round-key components of :class:`QALQAN_CVL`.
+
+    The middle rounds ``1, ..., N-1`` add their round key modulo ``2^128``
+    in little-endian byte order. :class:`QALQAN_CVL` realizes this by
+    reversing the byte order of the state around a big-endian
+    ``ModAdd_CVL(128)``, so the round keys of these rounds are stored with
+    their byte order reversed. The whitening keys of rounds ``0`` and ``N``
+    are XORed and stay unchanged.
 
     INPUT:
 
-        - ``R`` -- integer (optional); Number of rounds ``N``.  If omitted it
-          is derived from the key length (``17 + floor((KLen-256)/128)*2``),
-          or from the number of supplied round keys.
+        - ``round_keys`` -- list of 128-bit integers; Reference round keys
+          (big-endian integers of the 16 round-key bytes), in round order
+          (round key of round ``0`` first).
 
-        - ``rks`` -- list (optional); The round keys, as a list of 128-bit
-          integers.  The full cipher requires ``N + 1`` keys (one extra for
-          the final whitening step).
+        - ``key_size`` -- integer (default: ``256``); Key size in bits, which
+          determines the number of rounds ``N``.
 
-        - ``key`` -- bytes (optional); The encryption key (256..1024 bit, in
-          128-bit steps).  Used to generate the round keys when ``rks`` is not
-          given.  Defaults to a 256-bit all-zero key when neither ``rks`` nor
-          ``key`` is supplied.
+    OUTPUT: A list of 128-bit integers, in the same order as ``round_keys``.
 
-        - ``start_round`` -- integer (optional); First round to include
-          (0-based, inclusive).  Round ``0`` is the initial whitening
-          (``XOR -> S -> L``).  When omitted together with ``end_round``,
-          ``R`` or the full cipher length is used.
+    EXAMPLES::
 
-        - ``end_round`` -- integer (optional); Last round to include
-          (0-based, inclusive).  Round ``N`` is the final whitening XOR.
-
-        - ``name`` -- string (optional); Name of the cipher.
-
-    OUTPUT: A ``Cipher`` object modeling Qalqan.
-
-    .. NOTE::
-
-        ``QALQAN_CVL(R, rks)`` mirrors the "plug-and-play" round-key interface
-        of :class:`civerly.cipher_implementations.speck.SPECK_CVL`.  When only
-        a ``key`` is supplied, the round keys are taken from the reconstructed
-        key schedule of the reference implementation.
-
-    EXAMPLES:
-
-    Default constructor (256-bit zero key, full 17 rounds) works without
-    any explicit key material::
-
-        sage: from civerly.cipher_implementations.qalqan import QALQAN_CVL
-        sage: from civerly.util import int_to_vec, vec_to_int
-        sage: pt = 0x102030405060708090a0b0c0d0e0f
-        sage: ct = vec_to_int(QALQAN_CVL()(
-        ....:     int_to_vec(pt, 128)
-        ....:   ))
-        sage: ct == 0xae19d9af6b1d9d3bd031b18783806c77
-        True
-
-    Basic encryption with a 256-bit key against a pre-computed known vector::
-
-        sage: from civerly.cipher_implementations.qalqan import QALQAN_CVL
-        sage: from civerly.util import int_to_vec, vec_to_int
-        sage: key = bytes(range(32))                  # 256-bit key
-        sage: rks = [
-        ....:   0xdefc7d5097fc5b4689062b14bf944ca7,
-        ....:   0x8f1410afec58fe73097f040930ca62f6,
-        ....:   0x59b8d4f39153592d2c56419489e0ce9b,
-        ....:   0x0598037b4d5fcdb61635965522839d7e,
-        ....:   0xb6055ccf4068bbe604492238af11eee5,
-        ....:   0xe4e5094f3ac1cea4d3557f423ce63b35,
-        ....:   0x8aa4d21af28fd0544367d5b84ef07df6,
-        ....:   0xb5ac1862e625a49acbf1d2d449f91c12,
-        ....:   0x3187eb20d862bdf7eaf3a9ffe386f9d6,
-        ....:   0x70edf6d9f0b2656e6cca9d7fc56b4271,
-        ....:   0x78b0ef25aad592d0855c3ca0ce662d9b,
-        ....:   0x93740497be2691c96dd4c0b8c66ad3cb,
-        ....:   0x5a683593815984db2f7cfd83be31e644,
-        ....:   0xe620e4e968e60d7b82c52c6a8bb42528,
-        ....:   0xc000c8821b4f395633853905f669f412,
-        ....:   0x71a9ec88e71db98432ec33a8e34cdd0e,
-        ....:   0x02e4f4854d340fc17b1b87cee1f66973,
-        ....:   0x9f4e6d1d76acc3c943a7ffe2f4d3614e,
-        ....: ]
-        sage: pt = 0x102030405060708090a0b0c0d0e0f
-        sage: ct_rks = vec_to_int(QALQAN_CVL(rks=rks)(
-        ....:     int_to_vec(pt, 128)
-        ....:   ))
-        sage: ct_key = vec_to_int(QALQAN_CVL(key=key)(
-        ....:     int_to_vec(pt, 128)
-        ....:   ))
-        sage: ct_rks == ct_key == 0x4a4dcffd1527032f1e5418e08d0f5a9d
-        True
-
-    A second, longer key (384 bit) also matches a known vector::
-
-        sage: from civerly.cipher_implementations.qalqan import QALQAN_CVL
-        sage: from civerly.util import int_to_vec, vec_to_int
-        sage: key = bytes(range(48))                  # 384-bit key
-        sage: rks = [
-        ....:   0x78a85a037a8bac1d0533335b5842596a,
-        ....:   0x49dba62af577d7e6fe40915c6cc43d0d,
-        ....:   0x6a997f65fd6823f2017d00e9da410f3b,
-        ....:   0xb3f4570d58114114ede215a407af2f90,
-        ....:   0xefebf52a7df5d3b14fba863bd582d5df,
-        ....:   0x5ece47c5ee89dfb1d61c959065ae4d17,
-        ....:   0xc54ae3ec3552a2fca469d61a9934ea3e,
-        ....:   0x1a485a8851b4547edaa5503c7eca6d4d,
-        ....:   0x02cb8c91b38578e383f5abd40947aa05,
-        ....:   0x0be2c3da40f029b4f037e6f2a5cc3318,
-        ....:   0xb94dbf919cd8133706b7c3f53b34f5de,
-        ....:   0xff89cdb2869afcf16f57fabf55045a1b,
-        ....:   0x7c86318a44e29be1202d3a59bdbdd58b,
-        ....:   0xf7cec222625342c56a765312d151c23a,
-        ....:   0x5acbbda287cc96425c6a884a273b6deb,
-        ....:   0xae8c91ceca364c0c91de38c972a8b871,
-        ....:   0x1d65731cca4cc11ecc663a4e6bd6f2c6,
-        ....:   0xc4218cf8d363824e9ca8fbad760cb1f3,
-        ....:   0xaf84d0d8e81a73cc22aec5a54ca11442,
-        ....:   0x02c30281ebeac4ff6edc2ab711beaf99,
-        ....: ]
-        sage: pt = 0x102030405060708090a0b0c0d0e0f10
-        sage: ct_rks = vec_to_int(QALQAN_CVL(rks=rks)(
-        ....:     int_to_vec(pt, 128)
-        ....:   ))
-        sage: ct_key = vec_to_int(QALQAN_CVL(key=key)(
-        ....:     int_to_vec(pt, 128)
-        ....:   ))
-        sage: ct_rks == ct_key == 0xccd671da0ec1add7c4dd8aec9918b3fc
-        True
-
-    Known vectors for longer keys (512-bit and 1024-bit) also match::
-
-        sage: from civerly.cipher_implementations.qalqan import QALQAN_CVL
-        sage: from civerly.util import int_to_vec, vec_to_int
-        sage: key = bytes(range(64))                  # 512-bit key
-        sage: rks_512 = [
-        ....:   0x78a85a037a8bac2d45ce9c56dbe295a8,
-        ....:   0x27565f5c3cc8b962c147028195c7d7a3,
-        ....:   0xdd317fc57cf3dcfe1294bfb4f14b0fd0,
-        ....:   0xd7d7af56a45a08dccfd6ebede2fbf1d3,
-        ....:   0x9681b8bb4d4dc589c9c9e95d60aeb6bd,
-        ....:   0xd3f2567d352d0ec1e33d83deca94e8d4,
-        ....:   0x523bac839605f6f6d4edac47e335b758,
-        ....:   0xb45e63d13e4d95f7387dd983f7e60590,
-        ....:   0x148bb97f63df218014951085f8d147f6,
-        ....:   0xd17e1f188ffd1e2f3d2b756a7c641059,
-        ....:   0xfee441463c69f5c1b56c85400a7fc280,
-        ....:   0x6f05e3be10e17c4757d56e2246a8eb06,
-        ....:   0x15728dea8fb5f0c6e010d4f2066d906a,
-        ....:   0xc583de7d1d6c9fccfde45f85739257c3,
-        ....:   0x668d40c8314fb8342fc91f7377fd07f8,
-        ....:   0x314d9a24a0646e6f0c6fae5bf5ede792,
-        ....:   0x15b8a376acd098ab099b3bcfbed94517,
-        ....:   0x94b831d724a2a361f41b7e10440d3565,
-        ....:   0x87a593161961b02a395d8587bfc47ad2,
-        ....:   0xcb6b78191fa727794a5be2397a583441,
-        ....:   0x63fedb79d2dabfe91c01b52724821bdc,
-        ....:   0xb7aa3d885f6d254f3a737c205e4551eb,
-        ....: ]
-        sage: pt = 0x102030405060708090a0b0c0d0e0f
-        sage: ct_rks = vec_to_int(QALQAN_CVL(rks=rks_512)(
-        ....:     int_to_vec(pt, 128)
-        ....:   ))
-        sage: ct_key = vec_to_int(QALQAN_CVL(key=key)(
-        ....:     int_to_vec(pt, 128)
-        ....:   ))
-        sage: ct_rks == ct_key == 0xe6087adfa9f9eff16423e8e4a2e2a2ba
-        True
-
-        sage: key = bytes(range(128))                 # 1024-bit key
-        sage: rks_1024 = [
-        ....:   0x78a85a037a8bac2d45ce9c56dbe295c8,
-        ....:   0xa5ca283e6d70a5566ef1b0bee9560b86,
-        ....:   0x59c2740f257d2eee64bf9eb632b82808,
-        ....:   0x5e2a37e9f6699f4735a453bf6169fa8b,
-        ....:   0x25daaab7f13a4a84abfddc6ba750c948,
-        ....:   0xe61a5c5f0d37231e81e94a98c70a8f86,
-        ....:   0x741bc8645825476eeaffb347f7d76ea8,
-        ....:   0x54d0908f6294ae20463b3847534f16cd,
-        ....:   0xbf5d76184a50e70486aa4c8344d5ec5f,
-        ....:   0x38fa911e432e0b9b8dd8ca5fdd0ec189,
-        ....:   0x0f02776331aef13fbfa9defe4fc3e84b,
-        ....:   0x144913ae90e2dff64345c80bd1a3c26f,
-        ....:   0x6ca2e0e11ddf1c42f9f7466882658c08,
-        ....:   0xe89206eb853b5543cf86be1dc0046fa8,
-        ....:   0xcd60c34e29d226b6feaecdf5250b0a1a,
-        ....:   0x0504438c11bbee1d3a8d9a0ba3f7d383,
-        ....:   0xcc8d82343fdfa479897631da5e2b090d,
-        ....:   0xfe471b87e80708b612a371f9d63cfc46,
-        ....:   0x374669bcb42acb5ac69343a053b79568,
-        ....:   0x9b9c11bc3151ec39f036ff29aa4f66b6,
-        ....:   0x12f7f39153fde1d555195f0e1831607b,
-        ....:   0xbabed214c94ecc373d3625c845f99729,
-        ....:   0xd0f5f131c56f9464ab9f7f2ebe779813,
-        ....:   0x98b05cc7bb0726bf5885cd200aa809ee,
-        ....:   0x4be87b0900bc4067640c848e659dda21,
-        ....:   0xa3b00bbcdc41670b00505ded37a2f214,
-        ....:   0x2a86308474fae27c54c6d6b5d7c5a41a,
-        ....:   0x25272e333381ec19448b67d2b3e20b84,
-        ....:   0xde96579ca87373bcc1afa50bf7a9dffc,
-        ....:   0xbe018124754ea6562794e89b87604a59,
-        ....: ]
-        sage: ct_rks = vec_to_int(QALQAN_CVL(rks=rks_1024)(
-        ....:     int_to_vec(pt, 128)
-        ....:   ))
-        sage: ct_key = vec_to_int(QALQAN_CVL(key=key)(
-        ....:     int_to_vec(pt, 128)
-        ....:   ))
-        sage: ct_rks == ct_key == 0x024003fa97d2ec44826428ca4d5f00d5
-        True
-
-    Truncated cipher using the ``R`` parameter::
-
-        sage: from civerly.cipher_implementations.qalqan import QALQAN_CVL
-        sage: from civerly.util import int_to_vec, vec_to_int
-        sage: key = bytes(range(32))
-        sage: rks_256bit = [
-        ....:   0xdefc7d5097fc5b4689062b14bf944ca7,
-        ....:   0x8f1410afec58fe73097f040930ca62f6,
-        ....:   0x59b8d4f39153592d2c56419489e0ce9b,
-        ....:   0x0598037b4d5fcdb61635965522839d7e,
-        ....:   0xb6055ccf4068bbe604492238af11eee5,
-        ....:   0xe4e5094f3ac1cea4d3557f423ce63b35,
-        ....:   0x8aa4d21af28fd0544367d5b84ef07df6,
-        ....:   0xb5ac1862e625a49acbf1d2d449f91c12,
-        ....:   0x3187eb20d862bdf7eaf3a9ffe386f9d6,
-        ....:   0x70edf6d9f0b2656e6cca9d7fc56b4271,
-        ....:   0x78b0ef25aad592d0855c3ca0ce662d9b,
-        ....:   0x93740497be2691c96dd4c0b8c66ad3cb,
-        ....:   0x5a683593815984db2f7cfd83be31e644,
-        ....:   0xe620e4e968e60d7b82c52c6a8bb42528,
-        ....:   0xc000c8821b4f395633853905f669f412,
-        ....:   0x71a9ec88e71db98432ec33a8e34cdd0e,
-        ....:   0x02e4f4854d340fc17b1b87cee1f66973,
-        ....:   0x9f4e6d1d76acc3c943a7ffe2f4d3614e,
-        ....: ]
-        sage: pt = int_to_vec(0x0102030405060708090a0b0c0d0e0f, 128)
-        sage: ct_full = vec_to_int(QALQAN_CVL(rks=rks_256bit)(pt))
-        sage: ct_full == 0x4a4dcffd1527032f1e5418e08d0f5a9d
-        True
-        sage: ct_trunc = vec_to_int(QALQAN_CVL(R=4, rks=rks_256bit)(pt))
-        sage: ct_trunc_key = vec_to_int(QALQAN_CVL(R=4, key=key)(pt))
-        sage: ct_trunc == ct_trunc_key == 0x433ed3214f19515e47fc9854fb317d79
-        True
-
-    Explicit round slicing (middle rounds 2 through 5)::
-
-        sage: from civerly.cipher_implementations.qalqan import QALQAN_CVL
-        sage: from civerly.util import int_to_vec, vec_to_int
-        sage: key = bytes(range(32))
-        sage: rks_256bit = [
-        ....:   0xdefc7d5097fc5b4689062b14bf944ca7,
-        ....:   0x8f1410afec58fe73097f040930ca62f6,
-        ....:   0x59b8d4f39153592d2c56419489e0ce9b,
-        ....:   0x0598037b4d5fcdb61635965522839d7e,
-        ....:   0xb6055ccf4068bbe604492238af11eee5,
-        ....:   0xe4e5094f3ac1cea4d3557f423ce63b35,
-        ....:   0x8aa4d21af28fd0544367d5b84ef07df6,
-        ....:   0xb5ac1862e625a49acbf1d2d449f91c12,
-        ....:   0x3187eb20d862bdf7eaf3a9ffe386f9d6,
-        ....:   0x70edf6d9f0b2656e6cca9d7fc56b4271,
-        ....:   0x78b0ef25aad592d0855c3ca0ce662d9b,
-        ....:   0x93740497be2691c96dd4c0b8c66ad3cb,
-        ....:   0x5a683593815984db2f7cfd83be31e644,
-        ....:   0xe620e4e968e60d7b82c52c6a8bb42528,
-        ....:   0xc000c8821b4f395633853905f669f412,
-        ....:   0x71a9ec88e71db98432ec33a8e34cdd0e,
-        ....:   0x02e4f4854d340fc17b1b87cee1f66973,
-        ....:   0x9f4e6d1d76acc3c943a7ffe2f4d3614e,
-        ....: ]
-        sage: pt = 0x102030405060708090a0b0c0d0e0f
-        sage: ct_slice = vec_to_int(QALQAN_CVL(
-        ....:     start_round=2, end_round=5, rks=rks_256bit)(
-        ....:     int_to_vec(pt, 128)
-        ....:   ))
-        sage: ct_slice_key = vec_to_int(QALQAN_CVL(
-        ....:     start_round=2, end_round=5, key=key)(
-        ....:     int_to_vec(pt, 128)
-        ....:   ))
-        sage: ct_slice == ct_slice_key == 0x7056c812663bd9c44351a60626edc1b0
-        True
-
-    Linear trail search on 3 rounds of Qalqan::
-
-        sage: # optional - cryptominisat espresso
-        sage: from civerly.cipher_implementations.qalqan import QALQAN_CVL
-        sage: from civerly.model_options import *
-        sage: import tempfile
-        sage: with tempfile.TemporaryDirectory() as tmpdir:
-        ....:   cipher = QALQAN_CVL(R=3, rks=[0]*4)
-        ....:   model_options = MODEL_OPTIONS(
-        ....:       cryptanalysis=CRYPTANALYSIS.LINEAR,
-        ....:       optimization=OPTIMIZATION.SAT,
-        ....:       granularity=GRANULARITY.BITWISE,
-        ....:       sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
-        ....:       sat_solver=CRYPTOMINISAT_CVL(),
-        ....:       logic_minimizer=ESPRESSO_CVL(),
-        ....:       path=Path(tmpdir))
-        ....:   cipher.analyse(model_options=model_options)
-        Using existing file ..., make sure it is up to date!
-        14176 variables and 94699 clauses were written to ...
-        28
+        sage: from civerly.cipher_implementations.qalqan import (
+        ....:   qalqan_round_keys_to_components)
+        sage: rks = [0x0102, 0x0102, 0x0102]
+        sage: [hex(k) for k in qalqan_round_keys_to_components(rks)]
+        ['0x102',
+         '0x2010000000000000000000000000000',
+         '0x2010000000000000000000000000000']
+        sage: rks = [0x0102] * 18
+        sage: [hex(k) for k in qalqan_round_keys_to_components(rks)[-2:]]
+        ['0x2010000000000000000000000000000', '0x102']
     """
+    n = _rounds_for_key(key_size // 8)
+    return [
+        _byte_rev_int(rk) if 0 < r < n else rk
+        for r, rk in enumerate(round_keys)
+    ]
 
+
+def qalqan_key_schedule(master_key, key_size=None):
+    r"""
+    The Qalqan key schedule, returning the round keys in the order and
+    representation expected by :class:`QALQAN_CVL` (see
+    :func:`qalqan_round_keys_to_components`).
+
+    INPUT:
+
+        - ``master_key`` -- bytes or integer; The key (256 to 1024 bit, in
+          128-bit steps).
+
+        - ``key_size`` -- integer (optional); Key size in bits. If omitted,
+          it is taken from the length of a ``bytes`` key, and an integer key
+          is padded to at least 256 bit.
+
+    OUTPUT: A list of the ``N + 1`` round keys of rounds ``0, ..., N`` as
+    128-bit integers, where ``N`` is the number of rounds for the given key
+    size.
+
+    EXAMPLES::
+
+        sage: from civerly.cipher_implementations.qalqan import qalqan_key_schedule
+        sage: rks = qalqan_key_schedule(bytes(range(32)))
+        sage: len(rks)
+        18
+        sage: [hex(rks[r]) for r in (0, 1, 17)]
+        ['0xdefc7d5097fc5b4689062b14bf944ca7',
+         '0xf662ca3009047f0973fe58ecaf10148f',
+         '0x9f4e6d1d76acc3c943a7ffe2f4d3614e']
+        sage: len(qalqan_key_schedule(0, key_size=384))
+        20
+    """
+    key = _key_to_bytes(master_key, key_size)
+    _check_key(key)
+    n = _rounds_for_key(len(key))
+    rks = [int.from_bytes(rk, "big") for rk in _qalqan_round_keys(key, n + 1)]
+    return qalqan_round_keys_to_components(rks, key_size=len(key) * 8)
+
+
+class QALQAN_CVL(CipherImplementation_CVL, Cipher):
     def __init__(
-        self, R=None, rks=None, key=None, start_round=None, end_round=None, name=None
+        self,
+        R=None,
+        key_schedule=None,
+        key=None,
+        key_size=256,
+        name="QALQAN",
     ):
-        if name is None:
-            name = "QALQAN"
+        r"""
+        The CiVerLy implementation of the Qalqan block cipher.
+        Note that due to limited literature on Qalqan, the test vectors
+        are obtained from a manually written reference implementation.
 
-        # ---- nominal full round count ---------------------------------
-        if rks is not None:
-            full_rounds = len(rks) - 1
-        elif key is not None:
-            normalized_key = _normalize_key(key)
-            full_rounds = _rounds_for_key(len(normalized_key))
-        else:
-            # Default to a 256-bit zero key when nothing is supplied.
-            key = bytes(32)
-            full_rounds = _rounds_for_key(len(key))
+        The rounds are numbered ``0, ..., N``, where ``N`` is the nominal
+        number of rounds for the key size (``17 + floor((KLen-256)/128)*2``):
+        round ``0`` is ``XOR -> S -> L``, rounds ``1, ..., N-1`` are
+        ``ADD -> S -> L`` and round ``N`` is the final whitening ``XOR``.
+        Every round uses one 128-bit round key.
 
-        # ---- resolve start_round / end_round --------------------------
-        if start_round is not None or end_round is not None:
-            if start_round is None or end_round is None:
-                raise ValueError("Both 'start_round' and 'end_round' must be provided.")
-            start_round = int(start_round)
-            end_round = int(end_round)
-            if start_round < 0:
-                raise ValueError("start_round must be non-negative.")
-            if end_round < start_round:
-                raise ValueError("end_round must be >= start_round.")
-        elif R is not None:
-            start_round = 0
-            end_round = int(R) - 1
-        else:
-            start_round = 0
-            end_round = full_rounds
+        INPUT:
 
-        # ---- obtain round keys ----------------------------------------
-        if rks is None:
-            if end_round is not None:
-                needed = end_round + 1
-            elif R is not None:
-                needed = full_rounds + 1 if full_rounds == R else R
-            else:
-                needed = full_rounds + 1
-            rks = [int.from_bytes(rk, "big") for rk in _qalqan_round_keys(key, needed)]
+            - ``R`` -- integer (optional); Number of rounds, starting with
+              round ``0`` (rounds ``0, ..., R - 1``, at most ``N + 1``). The
+              full cipher has ``R = N + 1`` rounds (``18`` for a 256-bit
+              key), which is the default; a smaller ``R`` ends with a middle
+              round.
 
-        # Validate range
-        if end_round >= len(rks):
+            - ``key_schedule`` -- callable or
+              :class:`civerly.keyschedule.KeySchedule` (optional); Key
+              schedule used to derive round keys from ``key`` via
+              ``set_round_keys``. Pass :func:`qalqan_key_schedule` to use the
+              real Qalqan key schedule (with :func:`functools.partial` to set
+              its ``key_size`` for integer keys), or
+              :class:`civerly.keyschedule.DefaultKeySchedule_CVL` to pass
+              explicit round keys (``R`` of them, 128 bits each, converted
+              with :func:`qalqan_round_keys_to_components`). Defaults to
+              ``None`` (no key schedule, all-zero round keys).
+
+            - ``key`` -- bytes, integer or list of integers (optional); The
+              master key passed to ``key_schedule``, immediately expanded and
+              injected via ``set_round_keys`` when both are given. Has no
+              effect when ``key_schedule`` is ``None``. When using
+              :class:`civerly.keyschedule.DefaultKeySchedule_CVL`, this is the
+              list of round keys (round key 0 first).
+
+            - ``key_size`` -- integer (default: ``256``); Key size in bits
+              (256 to 1024, in 128-bit steps). It determines ``N`` and hence
+              which round is the final whitening round.
+
+            - ``name`` -- string (default: ``"QALQAN"``); Name of the cipher.
+
+        This cipher is "plug-and-play" usable, i.e. it can be directly used
+        when imported.
+
+        EXAMPLES:
+
+        Default constructor (full 256-bit-key cipher, all-zero round keys)::
+
+            sage: from civerly.cipher_implementations.qalqan import QALQAN_CVL
+            sage: from civerly.util import int_to_vec, vec_to_int
+            sage: QALQAN_CVL().R
+            18
+
+        Full cipher with the 256-bit all-zero key::
+
+            sage: from civerly.cipher_implementations.qalqan import (
+            ....:   QALQAN_CVL, qalqan_key_schedule)
+            sage: from civerly.util import int_to_vec, vec_to_int
+            sage: pt = 0x102030405060708090a0b0c0d0e0f
+            sage: cipher = QALQAN_CVL(key_schedule=qalqan_key_schedule, key=bytes(32))
+            sage: vec_to_int(cipher(int_to_vec(pt, 128))) == \
+            ....:   0xae19d9af6b1d9d3bd031b18783806c77
+            True
+
+        Basic encryption with a 256-bit key against a pre-computed known
+        vector, once with the key schedule and once with explicit round keys
+        via :class:`civerly.keyschedule.DefaultKeySchedule_CVL`::
+
+            sage: from civerly.cipher_implementations.qalqan import (
+            ....:   QALQAN_CVL, qalqan_key_schedule,
+            ....:   qalqan_round_keys_to_components)
+            sage: from civerly.keyschedule import DefaultKeySchedule_CVL
+            sage: from civerly.util import int_to_vec, vec_to_int
+            sage: key = bytes(range(32))                  # 256-bit key
+            sage: rks = [
+            ....:   0xdefc7d5097fc5b4689062b14bf944ca7,
+            ....:   0x8f1410afec58fe73097f040930ca62f6,
+            ....:   0x59b8d4f39153592d2c56419489e0ce9b,
+            ....:   0x0598037b4d5fcdb61635965522839d7e,
+            ....:   0xb6055ccf4068bbe604492238af11eee5,
+            ....:   0xe4e5094f3ac1cea4d3557f423ce63b35,
+            ....:   0x8aa4d21af28fd0544367d5b84ef07df6,
+            ....:   0xb5ac1862e625a49acbf1d2d449f91c12,
+            ....:   0x3187eb20d862bdf7eaf3a9ffe386f9d6,
+            ....:   0x70edf6d9f0b2656e6cca9d7fc56b4271,
+            ....:   0x78b0ef25aad592d0855c3ca0ce662d9b,
+            ....:   0x93740497be2691c96dd4c0b8c66ad3cb,
+            ....:   0x5a683593815984db2f7cfd83be31e644,
+            ....:   0xe620e4e968e60d7b82c52c6a8bb42528,
+            ....:   0xc000c8821b4f395633853905f669f412,
+            ....:   0x71a9ec88e71db98432ec33a8e34cdd0e,
+            ....:   0x02e4f4854d340fc17b1b87cee1f66973,
+            ....:   0x9f4e6d1d76acc3c943a7ffe2f4d3614e,
+            ....: ]
+            sage: rks_cvl = qalqan_round_keys_to_components(rks)
+            sage: qalqan_key_schedule(key) == rks_cvl
+            True
+            sage: pt = 0x102030405060708090a0b0c0d0e0f
+            sage: ct_rks = vec_to_int(QALQAN_CVL(
+            ....:     key_schedule=DefaultKeySchedule_CVL(128, 18), key=rks_cvl)(
+            ....:     int_to_vec(pt, 128)
+            ....:   ))
+            sage: ct_key = vec_to_int(QALQAN_CVL(
+            ....:     key_schedule=qalqan_key_schedule, key=key)(
+            ....:     int_to_vec(pt, 128)
+            ....:   ))
+            sage: ct_rks == ct_key == 0x4a4dcffd1527032f1e5418e08d0f5a9d
+            True
+
+        A second, longer key (384 bit) also matches a known vector::
+
+            sage: from functools import partial
+            sage: key = bytes(range(48))                  # 384-bit key
+            sage: rks = [
+            ....:   0x78a85a037a8bac1d0533335b5842596a,
+            ....:   0x49dba62af577d7e6fe40915c6cc43d0d,
+            ....:   0x6a997f65fd6823f2017d00e9da410f3b,
+            ....:   0xb3f4570d58114114ede215a407af2f90,
+            ....:   0xefebf52a7df5d3b14fba863bd582d5df,
+            ....:   0x5ece47c5ee89dfb1d61c959065ae4d17,
+            ....:   0xc54ae3ec3552a2fca469d61a9934ea3e,
+            ....:   0x1a485a8851b4547edaa5503c7eca6d4d,
+            ....:   0x02cb8c91b38578e383f5abd40947aa05,
+            ....:   0x0be2c3da40f029b4f037e6f2a5cc3318,
+            ....:   0xb94dbf919cd8133706b7c3f53b34f5de,
+            ....:   0xff89cdb2869afcf16f57fabf55045a1b,
+            ....:   0x7c86318a44e29be1202d3a59bdbdd58b,
+            ....:   0xf7cec222625342c56a765312d151c23a,
+            ....:   0x5acbbda287cc96425c6a884a273b6deb,
+            ....:   0xae8c91ceca364c0c91de38c972a8b871,
+            ....:   0x1d65731cca4cc11ecc663a4e6bd6f2c6,
+            ....:   0xc4218cf8d363824e9ca8fbad760cb1f3,
+            ....:   0xaf84d0d8e81a73cc22aec5a54ca11442,
+            ....:   0x02c30281ebeac4ff6edc2ab711beaf99,
+            ....: ]
+            sage: rks_cvl = qalqan_round_keys_to_components(rks, key_size=384)
+            sage: qalqan_key_schedule(key) == rks_cvl
+            True
+            sage: pt = 0x102030405060708090a0b0c0d0e0f10
+            sage: ct_rks = vec_to_int(QALQAN_CVL(key_size=384,
+            ....:     key_schedule=DefaultKeySchedule_CVL(128, 20), key=rks_cvl)(
+            ....:     int_to_vec(pt, 128)
+            ....:   ))
+            sage: ct_key = vec_to_int(QALQAN_CVL(key_size=384,
+            ....:     key_schedule=partial(qalqan_key_schedule, key_size=384),
+            ....:     key=key)(
+            ....:     int_to_vec(pt, 128)
+            ....:   ))
+            sage: ct_rks == ct_key == 0xccd671da0ec1add7c4dd8aec9918b3fc
+            True
+
+        Known vectors for longer keys (512-bit and 1024-bit) also match::
+
+            sage: key = bytes(range(64))                  # 512-bit key
+            sage: rks_512 = [
+            ....:   0x78a85a037a8bac2d45ce9c56dbe295a8,
+            ....:   0x27565f5c3cc8b962c147028195c7d7a3,
+            ....:   0xdd317fc57cf3dcfe1294bfb4f14b0fd0,
+            ....:   0xd7d7af56a45a08dccfd6ebede2fbf1d3,
+            ....:   0x9681b8bb4d4dc589c9c9e95d60aeb6bd,
+            ....:   0xd3f2567d352d0ec1e33d83deca94e8d4,
+            ....:   0x523bac839605f6f6d4edac47e335b758,
+            ....:   0xb45e63d13e4d95f7387dd983f7e60590,
+            ....:   0x148bb97f63df218014951085f8d147f6,
+            ....:   0xd17e1f188ffd1e2f3d2b756a7c641059,
+            ....:   0xfee441463c69f5c1b56c85400a7fc280,
+            ....:   0x6f05e3be10e17c4757d56e2246a8eb06,
+            ....:   0x15728dea8fb5f0c6e010d4f2066d906a,
+            ....:   0xc583de7d1d6c9fccfde45f85739257c3,
+            ....:   0x668d40c8314fb8342fc91f7377fd07f8,
+            ....:   0x314d9a24a0646e6f0c6fae5bf5ede792,
+            ....:   0x15b8a376acd098ab099b3bcfbed94517,
+            ....:   0x94b831d724a2a361f41b7e10440d3565,
+            ....:   0x87a593161961b02a395d8587bfc47ad2,
+            ....:   0xcb6b78191fa727794a5be2397a583441,
+            ....:   0x63fedb79d2dabfe91c01b52724821bdc,
+            ....:   0xb7aa3d885f6d254f3a737c205e4551eb,
+            ....: ]
+            sage: rks_cvl = qalqan_round_keys_to_components(rks_512, key_size=512)
+            sage: qalqan_key_schedule(key) == rks_cvl
+            True
+            sage: pt = 0x102030405060708090a0b0c0d0e0f
+            sage: ct_rks = vec_to_int(QALQAN_CVL(key_size=512,
+            ....:     key_schedule=DefaultKeySchedule_CVL(128, 22), key=rks_cvl)(
+            ....:     int_to_vec(pt, 128)
+            ....:   ))
+            sage: ct_key = vec_to_int(QALQAN_CVL(key_size=512,
+            ....:     key_schedule=partial(qalqan_key_schedule, key_size=512),
+            ....:     key=key)(
+            ....:     int_to_vec(pt, 128)
+            ....:   ))
+            sage: ct_rks == ct_key == 0xe6087adfa9f9eff16423e8e4a2e2a2ba
+            True
+
+            sage: key = bytes(range(128))                 # 1024-bit key
+            sage: rks_1024 = [
+            ....:   0x78a85a037a8bac2d45ce9c56dbe295c8,
+            ....:   0xa5ca283e6d70a5566ef1b0bee9560b86,
+            ....:   0x59c2740f257d2eee64bf9eb632b82808,
+            ....:   0x5e2a37e9f6699f4735a453bf6169fa8b,
+            ....:   0x25daaab7f13a4a84abfddc6ba750c948,
+            ....:   0xe61a5c5f0d37231e81e94a98c70a8f86,
+            ....:   0x741bc8645825476eeaffb347f7d76ea8,
+            ....:   0x54d0908f6294ae20463b3847534f16cd,
+            ....:   0xbf5d76184a50e70486aa4c8344d5ec5f,
+            ....:   0x38fa911e432e0b9b8dd8ca5fdd0ec189,
+            ....:   0x0f02776331aef13fbfa9defe4fc3e84b,
+            ....:   0x144913ae90e2dff64345c80bd1a3c26f,
+            ....:   0x6ca2e0e11ddf1c42f9f7466882658c08,
+            ....:   0xe89206eb853b5543cf86be1dc0046fa8,
+            ....:   0xcd60c34e29d226b6feaecdf5250b0a1a,
+            ....:   0x0504438c11bbee1d3a8d9a0ba3f7d383,
+            ....:   0xcc8d82343fdfa479897631da5e2b090d,
+            ....:   0xfe471b87e80708b612a371f9d63cfc46,
+            ....:   0x374669bcb42acb5ac69343a053b79568,
+            ....:   0x9b9c11bc3151ec39f036ff29aa4f66b6,
+            ....:   0x12f7f39153fde1d555195f0e1831607b,
+            ....:   0xbabed214c94ecc373d3625c845f99729,
+            ....:   0xd0f5f131c56f9464ab9f7f2ebe779813,
+            ....:   0x98b05cc7bb0726bf5885cd200aa809ee,
+            ....:   0x4be87b0900bc4067640c848e659dda21,
+            ....:   0xa3b00bbcdc41670b00505ded37a2f214,
+            ....:   0x2a86308474fae27c54c6d6b5d7c5a41a,
+            ....:   0x25272e333381ec19448b67d2b3e20b84,
+            ....:   0xde96579ca87373bcc1afa50bf7a9dffc,
+            ....:   0xbe018124754ea6562794e89b87604a59,
+            ....: ]
+            sage: rks_cvl = qalqan_round_keys_to_components(rks_1024, key_size=1024)
+            sage: qalqan_key_schedule(key) == rks_cvl
+            True
+            sage: ct_rks = vec_to_int(QALQAN_CVL(key_size=1024,
+            ....:     key_schedule=DefaultKeySchedule_CVL(128, 30), key=rks_cvl)(
+            ....:     int_to_vec(pt, 128)
+            ....:   ))
+            sage: ct_key = vec_to_int(QALQAN_CVL(key_size=1024,
+            ....:     key_schedule=partial(qalqan_key_schedule, key_size=1024),
+            ....:     key=key)(
+            ....:     int_to_vec(pt, 128)
+            ....:   ))
+            sage: ct_rks == ct_key == 0x024003fa97d2ec44826428ca4d5f00d5
+            True
+
+        Truncated cipher using the ``R`` parameter (the key schedule yields
+        more round keys than needed, only the leading ones are used)::
+
+            sage: key = bytes(range(32))
+            sage: pt = int_to_vec(0x0102030405060708090a0b0c0d0e0f, 128)
+            sage: rks_256bit = qalqan_key_schedule(key)
+            sage: ct_trunc = vec_to_int(QALQAN_CVL(R=4,
+            ....:     key_schedule=DefaultKeySchedule_CVL(128, 4),
+            ....:     key=rks_256bit[:4])(pt))
+            sage: ct_trunc_key = vec_to_int(QALQAN_CVL(R=4,
+            ....:     key_schedule=qalqan_key_schedule, key=key)(pt))
+            sage: ct_trunc == ct_trunc_key == 0x433ed3214f19515e47fc9854fb317d79
+            True
+
+        Invalid round numbers are rejected::
+
+            sage: QALQAN_CVL(R=19)
+            Traceback (most recent call last):
+            ...
+            ValueError: R=19 exceeds N + 1 = 18 rounds for a 256-bit key.
+            sage: QALQAN_CVL(R=0)
+            Traceback (most recent call last):
+            ...
+            ValueError: R must be positive.
+
+        Linear trail search on 3 rounds of Qalqan::
+
+            sage: # optional - cryptominisat espresso
+            sage: from civerly.cipher_implementations.qalqan import QALQAN_CVL
+            sage: from civerly.model_options import *
+            sage: import tempfile
+            sage: with tempfile.TemporaryDirectory() as tmpdir:
+            ....:   cipher = QALQAN_CVL(R=3)
+            ....:   model_options = MODEL_OPTIONS(
+            ....:       cryptanalysis=CRYPTANALYSIS.LINEAR,
+            ....:       optimization=OPTIMIZATION.SAT,
+            ....:       granularity=GRANULARITY.BITWISE,
+            ....:       sbox_modeling=SBOX_MODELING.LOGICAL_COND_ESPRESSO,
+            ....:       sat_solver=CRYPTOMINISAT_CVL(),
+            ....:       logic_minimizer=ESPRESSO_CVL(),
+            ....:       path=Path(tmpdir))
+            ....:   cipher.analyse(model_options=model_options)
+            Using existing file ..., make sure it is up to date!
+            14176 variables and 94699 clauses were written to ...
+            28
+        """
+        if key_size < 256 or key_size > 1024 or key_size % 128:
+            raise ValueError("key_size must be 256..1024 bit, in 128-bit steps.")
+        full_rounds = _rounds_for_key(key_size // 8)
+
+        if R is None:
+            R = full_rounds + 1
+        R = int(R)
+        if R < 1:
+            raise ValueError("R must be positive.")
+        if R > full_rounds + 1:
             raise ValueError(
-                f"Not enough round keys: end_round={end_round}, "
-                f"but only {len(rks)} keys supplied."
+                f"R={R} exceeds N + 1 = {full_rounds + 1} rounds for a "
+                f"{key_size}-bit key."
             )
-        if start_round > end_round:
-            raise ValueError(
-                f"Empty round range: start_round={start_round} > end_round={end_round}."
-            )
+
+        super().__init__(
+            128, 128, R=R, key_schedule=key_schedule, key=key, name=name
+        )
 
         # ---- reusable S-box layer -------------------------------------
         sbox_cipher = Cipher(128, 128, name="SBoxLayer")
@@ -940,44 +1004,47 @@ class QALQAN_CVL:
         )
         n_l = middle_round.add_subcipher(l_cipher, [(n_s, (i, i)) for i in range(128)])
         middle_round.add_output([(n_l, (i, i)) for i in range(128)])
-        # The template is mutated before each instantiation to set the
-        # per-round key, mirroring the SPECK_CVL schedule pattern.
-        add_node_template = middle_round.nodes[n_add]
 
         # ---- assemble the full cipher ---------------------------------
-        cipher = Cipher(128, 128, name=name)
+        # Every round-key component is built with constant 0; the round keys
+        # are injected via ``set_round_keys``.
+        node = self.IN
+        rk_paths = []
 
-        node = cipher.IN
-        current = start_round
-
-        # Round 0 (or the first requested round if start_round == 0)
-        if current == 0:
-            kw = RoundkeyXOR_CVL(128, rks[0], name="KeyAdd_start")
-            node = cipher.add_subcipher(kw, [(node, (i, i)) for i in range(128)])
-            node = cipher.add_subcipher(
-                sbox_cipher, [(node, (i, i)) for i in range(128)]
-            )
-            node = cipher.add_subcipher(l_cipher, [(node, (i, i)) for i in range(128)])
-            current = 1
-
-        # Remaining rounds up to end_round
-        for r in range(current, end_round + 1):
-            if r == end_round and r == full_rounds:
+        for r in range(self.R):
+            if r == 0:
+                # Initial whitening XOR -> S -> L
+                kw = RoundkeyXOR_CVL(128, 0, name="KeyAdd_start")
+                node = self.add_subcipher(kw, [(node, (i, i)) for i in range(128)])
+                rk_paths.append((node,))
+                node = self.add_subcipher(
+                    sbox_cipher, [(node, (i, i)) for i in range(128)]
+                )
+                node = self.add_subcipher(
+                    l_cipher, [(node, (i, i)) for i in range(128)]
+                )
+            elif r == full_rounds:
                 # Final whitening (no S, no L)
-                kw = RoundkeyXOR_CVL(128, rks[r], name="KeyAdd_fin")
-                node = cipher.add_subcipher(kw, [(node, (i, i)) for i in range(128)])
+                kw = RoundkeyXOR_CVL(128, 0, name="KeyAdd_fin")
+                node = self.add_subcipher(kw, [(node, (i, i)) for i in range(128)])
+                rk_paths.append((node,))
             else:
                 # ADD -> S -> L middle round
-                add_node_template.nodes[rk_node].const = _byte_rev_int(rks[r])
-                node = cipher.add_subcipher(
+                node = self.add_subcipher(
                     middle_round, [(node, (i, i)) for i in range(128)]
                 )
+                rk_paths.append((node, n_add, rk_node))
 
-        cipher.add_output([(node, (i, i)) for i in range(128)])
+        self.add_output([(node, (i, i)) for i in range(128)])
 
-        self.cipher = cipher
+        # Round-key components as they live inside ``self`` (add_subcipher
+        # deep-copies), one per round, in round order.
+        self._rk_components = []
+        for path in rk_paths:
+            comp = self
+            for n in path:
+                comp = comp.nodes[n]
+            self._rk_components.append(comp)
 
-    def __new__(cls, *args, **kwargs):
-        instance = super().__new__(cls)
-        instance.__init__(*args, **kwargs)
-        return instance.cipher
+        if key_schedule is not None and key is not None:
+            self.set_round_keys(key)

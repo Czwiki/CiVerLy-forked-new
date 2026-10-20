@@ -1,37 +1,88 @@
 from sage.crypto.sbox import SBox
 
+from civerly.cipher_implementations.base import CipherImplementation_CVL
 from civerly.component import XOR_CVL, PermuteLayer_CVL, RoundkeyXOR_CVL, SBox_CVL
 from civerly.wordsboxcipher import WordSBoxCipher
 
 
-class WARP_CVL:
-    def __init__(self, R=41, key=None, rks=None, name=None):
+def warp_key_schedule(master_key, rounds=41):
+    r"""
+    Generate the 64-bit round keys for WARP from a 128-bit master key.
+
+    The master key is split into two halves ``K0`` (upper 64 bits) and
+    ``K1`` (lower 64 bits), which are used alternately as round keys,
+    starting with ``K0``.
+
+    INPUT:
+
+        - ``master_key`` -- integer; the 128-bit master key.
+
+        - ``rounds`` -- integer (default: ``41``); number of rounds.
+
+    OUTPUT: A list of ``rounds`` 64-bit round-key integers.
+
+    EXAMPLES::
+
+        sage: from civerly.cipher_implementations.warp import warp_key_schedule
+        sage: rks = warp_key_schedule(0x0123456789abcdeffedcba9876543210)
+        sage: len(rks)
+        41
+        sage: [hex(k) for k in rks[:2]]
+        ['0x123456789abcdef', '0xfedcba9876543210']
+        sage: rks[40] == rks[0]
+        True
+    """
+    k0 = (master_key >> 64) & ((1 << 64) - 1)
+    k1 = master_key & ((1 << 64) - 1)
+    return [k0 if r % 2 == 0 else k1 for r in range(rounds)]
+
+
+class WARP_CVL(CipherImplementation_CVL, WordSBoxCipher):
+    def __init__(self, R=41, key_schedule=None, key=None, name="WARP"):
         r"""
-        The CiVerLy implementation of WARP. It takes in the following
-        arguments:
+        The CiVerLy implementation of WARP.
 
-            - ``R`` -- integer (default: ``41``); Number of rounds.
+        INPUT:
 
-            - ``key`` -- integer (optional); A 128-bit master key. The
-              lower 64 bits are ``K1`` and the upper 64 bits are ``K0``.
+            - ``R`` -- integer (default: ``41``); Number of rounds. The first
+              ``min(R, 40)`` rounds include the nibble shuffle; the 41st
+              round (only present if ``R >= 41``) omits it. At most 41
+              rounds are built.
 
-            - ``rks`` -- list (optional); Explicit round keys for each
-              of the ``R`` rounds. If given, overrides ``key``. Each
-              element should be a 64-bit integer representing 16 nibbles.
+            - ``key_schedule`` -- callable or
+              :class:`civerly.keyschedule.KeySchedule` (optional); Key
+              schedule used to derive round keys from ``key`` via
+              ``set_round_keys``. Pass :func:`warp_key_schedule` to use the
+              real WARP key schedule, or
+              :class:`civerly.keyschedule.DefaultKeySchedule_CVL` to pass
+              explicit round keys (one per round, 64 bits each). Defaults to
+              ``None`` (no key schedule, all-zero round keys).
 
-            - ``name`` -- string (optional); The name of the cipher.
+            - ``key`` -- integer or list of integers (optional); The 128-bit
+              master key passed to ``key_schedule``, immediately expanded and
+              injected via ``set_round_keys`` when both are given. The lower
+              64 bits are ``K1`` and the upper 64 bits are ``K0``. Has no
+              effect when ``key_schedule`` is ``None``. When using
+              :class:`civerly.keyschedule.DefaultKeySchedule_CVL`, this is the
+              list of round keys (round key 0 first).
+
+            - ``name`` -- string (default: ``"WARP"``); The name of the cipher.
+
+        This cipher is "plug-and-play" usable, i.e. it can be directly used
+        when imported.
 
         EXAMPLES:
 
         Encrypt using the test vectors from the specification::
 
-            sage: from civerly.cipher_implementations.warp import WARP_CVL
+            sage: from civerly.cipher_implementations.warp \
+            ....:   import WARP_CVL, warp_key_schedule
             sage: from civerly.util import int_to_vec, vec_to_int
             sage: # Test vector 1
             sage: key = 0x0123456789abcdeffedcba9876543210
             sage: pt  = 0x0123456789abcdeffedcba9876543210
             sage: ct  = 0x24ce0a8efd9f32de529d5fdf45703a8d
-            sage: warp = WARP_CVL(key=key)
+            sage: warp = WARP_CVL(key_schedule=warp_key_schedule, key=key)
             sage: vec_to_int(warp(int_to_vec(pt, 128))) == ct
             True
             sage: # Test vector 2
@@ -43,8 +94,21 @@ class WARP_CVL:
             sage: key3 = 0x0acd022f680a547fee03c0867b09e3d7
             sage: pt3  = 0xaf6cdd90fc5a6eaa897bcd1208d391e1
             sage: ct3  = 0x6123995f1924d31425641acdd058dd46
-            sage: warp3 = WARP_CVL(key=key3)
+            sage: warp3 = WARP_CVL(key_schedule=warp_key_schedule, key=key3)
             sage: vec_to_int(warp3(int_to_vec(pt3, 128))) == ct3
+            True
+            sage: warp3.set_round_keys(key)
+            sage: vec_to_int(warp3(int_to_vec(pt, 128))) == ct
+            True
+
+        Explicit round keys can be passed via
+        :class:`civerly.keyschedule.DefaultKeySchedule_CVL`::
+
+            sage: from civerly.keyschedule import DefaultKeySchedule_CVL
+            sage: rks = warp_key_schedule(key3)
+            sage: warp = WARP_CVL(
+            ....:   key_schedule=DefaultKeySchedule_CVL(64, 41), key=rks)
+            sage: vec_to_int(warp(int_to_vec(pt3, 128))) == ct3
             True
 
         Model the cipher with MILP (bitwise)::
@@ -53,7 +117,7 @@ class WARP_CVL:
             sage: from civerly.cipher_implementations.warp import WARP_CVL
             sage: from civerly.model_options import *
             sage: import tempfile
-            sage: warp = WARP_CVL(R=4, key=0x0)
+            sage: warp = WARP_CVL(R=4)
             sage: with tempfile.TemporaryDirectory() as tmpdir:
             ....:   model_options = MODEL_OPTIONS(
             ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
@@ -73,7 +137,7 @@ class WARP_CVL:
             sage: from civerly.model_options import *
             sage: import tempfile
             sage: with tempfile.TemporaryDirectory() as tmpdir:  # optional - cryptominisat  # optional - espresso
-            ....:   warp = WARP_CVL(R=8, key=0x0)
+            ....:   warp = WARP_CVL(R=8)
             ....:   model_options = MODEL_OPTIONS(
             ....:     cryptanalysis=CRYPTANALYSIS.DIFFERENTIAL,
             ....:     optimization=OPTIMIZATION.SAT,
@@ -89,8 +153,7 @@ class WARP_CVL:
             18048 variables and 42369 clauses were written to ...
             22
         """
-        if name is None:
-            name = "WARP"
+        super().__init__(4, 32, 32, R=R, key_schedule=key_schedule, key=key, name=name)
 
         # 4-bit S-box
         sbox = SBox(
@@ -206,16 +269,6 @@ class WARP_CVL:
         # Precompute 128-bit round-constant values for RoundkeyXOR_CVL.
         # Word 1 gets RC0, word 3 gets RC1.
         rc_consts = [(RC0[r] << 120) | (RC1[r] << 112) for r in range(41)]
-
-        # Derive round keys
-        if rks is not None:
-            round_keys = rks
-        elif key is not None:
-            k0 = (key >> 64) & ((1 << 64) - 1)
-            k1 = key & ((1 << 64) - 1)
-            round_keys = [k0 if r % 2 == 0 else k1 for r in range(40)] + [k0]
-        else:
-            round_keys = [0 for _ in range(41)]
 
         # S-box layer on 16 nibbles
         sbox_layer = WordSBoxCipher(4, 16, 16, name="SBoxLayer")
@@ -337,29 +390,26 @@ class WARP_CVL:
         # --------------------------------------------------------
 
         # Assemble the cipher
-        warp_cipher = WordSBoxCipher(4, 32, 32, name=name)
-
-        cipher_node = warp_cipher.IN
-        for r in range(min(R, 40)):
-            warp_round.nodes[node_key].const = round_keys[r]
+        cipher_node = self.IN
+        rk_components = []
+        for r in range(min(self.R, 40)):
             warp_round.nodes[node_rc].const = rc_consts[r]
-            cipher_node = warp_cipher.add_subcipher(
+            cipher_node = self.add_subcipher(
                 warp_round, [(cipher_node, (i, i)) for i in range(32)]
             )
+            rk_components.append(self.nodes[r + 1].nodes[node_key])
 
-        # Final round (always uses K^0 and RC^{41})
-        if R >= 41:
-            warp_final.nodes[node_key_f].const = round_keys[40]
+        # Final round (uses RC^{41}, no shuffle)
+        if self.R >= 41:
             warp_final.nodes[node_rc_f].const = rc_consts[40]
-            cipher_node = warp_cipher.add_subcipher(
+            cipher_node = self.add_subcipher(
                 warp_final, [(cipher_node, (i, i)) for i in range(32)]
             )
+            rk_components.append(self.nodes[41].nodes[node_key_f])
 
-        warp_cipher.add_output([(cipher_node, (i, i)) for i in range(32)])
+        self.add_output([(cipher_node, (i, i)) for i in range(32)])
 
-        self.warp_cipher = warp_cipher
+        self._rk_components = rk_components
 
-    def __new__(cls, *args, **kwargs):
-        instance = super().__new__(cls)
-        instance.__init__(*args, **kwargs)
-        return instance.warp_cipher
+        if key_schedule is not None and key is not None:
+            self.set_round_keys(key)
