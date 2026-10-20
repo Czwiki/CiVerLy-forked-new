@@ -16,8 +16,8 @@ The internal state is organised as a rectangular array of 4-bit nibbles with
 4 rows. The cipher is built on ``WordSBoxCipher`` (wordsize 4); MixColumn is
 a single full-state linear layer (see ``_mix_columns``) and the shuffle layer
 acts on the whole state. The (Toeplitz-hash based) tweakey schedule is
-implemented in Python by :func:`blink_key_schedule`, which yields the
-whitening keys, round keys and tweak hashes that are injected into the
+implemented as a CiVerLy DAG by :class:`BLINK_KeySchedule_CVL`, which yields
+the whitening keys, round keys and tweak hashes that are injected into the
 cipher's round-key components via ``set_round_keys``.
 """
 
@@ -25,277 +25,22 @@ from sage.crypto.sbox import SBox
 from sage.matrix.constructor import Matrix as matrix
 from sage.rings.finite_rings.finite_field_constructor import GF
 
+from civerly.cipher import Cipher
 from civerly.cipher_implementations.base import CipherImplementation_CVL
 from civerly.component import (
     LinearLayer_CVL,
     PermuteLayer_CVL,
     RoundkeyXOR_CVL,
     SBox_CVL,
+    XOR_CVL,
 )
+from civerly.keyschedule import KeySchedule
+from civerly.util import int_to_vec, vec_to_int
 from civerly.wordsboxcipher import WordSBoxCipher
 
 # ---------------------------------------------------------------------------
 # Shared tables
 # ---------------------------------------------------------------------------
-
-HW2 = [
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-    1,
-    0,
-    0,
-    1,
-    1,
-    0,
-    0,
-    1,
-    0,
-    1,
-    1,
-    0,
-]
 
 # The 4-bit S-box S(x) of Blink (an involution).
 SBOX = SBox(
@@ -952,85 +697,6 @@ def _variant_config(block_bits, tweak_bits, key_bytes):
     return state_bytes, tweak_bytes, ra, rb, pbox, rc, rc_prime
 
 
-# ---------------------------------------------------------------------------
-# Key schedule (ported faithfully from the reference implementation)
-# ---------------------------------------------------------------------------
-
-
-def _hash_func(key, t, hk_len, state_bytes, tweak_bytes):
-    """Compute h = H(k) for a single hash function.
-
-    ``key`` and ``t`` are byte-lists (LSB-first, matching the reference),
-    ``hk_len`` is the length of the key used here (``state_bytes + tweak_bytes``).
-    Returns the hash as a list of ``state_bytes`` bytes.
-    """
-    h = [0] * state_bytes
-    for i in range(state_bytes - 1, -1, -1):
-        h[state_bytes - 1 - i] = 0
-        for c in range(8):
-            temp = [0] * tweak_bytes
-            for j in range(tweak_bytes):
-                left = (key[tweak_bytes + i - j] << c) & 0xFF
-                right = (key[tweak_bytes + i - j - 1] >> (8 - c)) & 0xFF
-                temp[tweak_bytes - 1 - j] = left ^ right
-            p = 0
-            for j in range(tweak_bytes):
-                p ^= t[j] & temp[j]
-                p &= 0xFF
-            h[state_bytes - 1 - i] ^= HW2[p] << c
-            h[state_bytes - 1 - i] &= 0xFF
-    return h
-
-
-def _generate_round_key(master_key, t, state_bytes, tweak_bytes, key_bytes):
-    """Port of ``BlinkCipher.generate_round_key``.
-
-    ``master_key`` and ``t`` are byte-lists (LSB-first). Returns
-    ``(rk, w, h)`` where each entry is itself a list of ``state_bytes`` bytes.
-    """
-    key_prime = [0] * key_bytes
-    for i in range(key_bytes):
-        for j in range(8):
-            bit_index = (11 * (8 * i + j)) % (key_bytes * 8)
-            byte_idx = bit_index // 8
-            bit_in_byte = bit_index % 8
-            bit_val = (master_key[byte_idx] >> bit_in_byte) & 1
-            key_prime[i] ^= bit_val << j
-            key_prime[i] &= 0xFF
-
-    rk = [[0] * state_bytes for _ in range(ra_rb(state_bytes, key_bytes))]
-    w = [[0] * state_bytes for _ in range(2)]
-    h = [[0] * state_bytes for _ in range(2)]
-
-    for i in range(state_bytes):
-        w[0][i] = master_key[i]
-        w[1][i] = master_key[i + state_bytes]
-        for j in range(len(rk)):
-            rk[j][i] = master_key[i + (j + 2) * state_bytes]
-
-    hk_len = state_bytes + tweak_bytes
-    hk = [[0] * hk_len for _ in range(2)]
-    for i in range(hk_len - 1, -1, -1):
-        if i > 0:
-            hk[0][i] = ((key_prime[i] << 1) ^ (key_prime[i - 1] >> 7)) & 0xFF
-            val = (key_prime[i + hk_len] << 2) & 0xFF
-            val2 = (key_prime[i + hk_len - 1] >> 6) & 0xFF
-            hk[1][i] = (val ^ val2) & 0xFF
-        else:
-            hk[0][i] = (key_prime[i] << 1) & 0xFF
-            val = (key_prime[i + hk_len] << 2) & 0xFF
-            val2 = (key_prime[i + hk_len - 1] >> 6) & 0xFF
-            hk[1][i] = ((val ^ val2) & 0xFE) & 0xFF
-
-    h[0] = _hash_func(hk[0], t, hk_len, state_bytes, tweak_bytes)
-    h[1] = _hash_func(hk[1], t, hk_len, state_bytes, tweak_bytes)
-    return rk, w, h
-
-
-def ra_rb(state_bytes, key_bytes):
-    return key_bytes // state_bytes - 2
-
-
 def _bytes_to_int(byte_list):
     """LSB-first byte list -> integer (byte 0 is the least significant)."""
     return sum(byte_list[i] << (8 * i) for i in range(len(byte_list)))
@@ -1107,95 +773,6 @@ def _vec_perm(pbox, state_nibbles):
     return perm
 
 
-# ---------------------------------------------------------------------------
-# Public key schedule
-# ---------------------------------------------------------------------------
-
-
-def blink_key_schedule(master_key, n=64, t=64, tweak=0, key_bytes=None, a=None, b=None):
-    r"""
-    The Blink tweakey schedule: derive the round-key values of a Blink
-    variant from the master key and the tweak.
-
-    Blink XORs five kinds of key material into the state: the whitening keys
-    ``w0`` / ``w1``, the round keys ``rk[0..a+b-1]`` and the tweak hashes
-    ``h0`` / ``h1`` (``h0 ^ h1`` in the middle stage). They are returned in
-    the order in which they occur in the cipher::
-
-        w0, rk[0..a-1], h0, rk[a..a+b-1], h0^h1,
-        rk[0..b-1], h1, rk[b..a+b-1], w1
-
-    i.e. ``2 * (a + b) + 5`` values of ``n`` bits each, matching the
-    ``_rk_components`` of :class:`BLINK_CVL` with the same ``a`` and ``b``.
-
-    INPUT:
-
-        - ``master_key`` -- integer; The master key (``key_bytes`` bytes).
-
-        - ``n`` -- integer (default: ``64``); Block size in bits, ``64`` or
-          ``128``.
-
-        - ``t`` -- integer (default: ``64``); Tweak size in bits.
-
-        - ``tweak`` -- integer (default: ``0``); The tweak.
-
-        - ``key_bytes`` -- integer (optional); Master key size in bytes,
-          which selects the variant for ``n = 128`` (``128`` for Blink-128a/b,
-          ``160`` for Blink-128A/B). Defaults to ``56`` for ``n = 64`` and
-          ``128`` for ``n = 128``.
-
-        - ``a``, ``b`` -- integers (optional); Number of outer / inner keyed
-          rounds of the (reduced) cipher, as in :class:`BLINK_CVL`. Default
-          to the standard values of the variant.
-
-    OUTPUT: A list of ``2 * (a + b) + 5`` integers of ``n`` bits each.
-
-    To use it as key schedule of :class:`BLINK_CVL` for anything but the
-    default parameters, fix the remaining arguments with
-    ``functools.partial`` (see :class:`BLINK_CVL`).
-
-    EXAMPLES::
-
-        sage: from civerly.cipher_implementations.blink import blink_key_schedule
-        sage: rks = blink_key_schedule(0, tweak=0x0123456789abcdef)
-        sage: len(rks)
-        15
-        sage: [hex(rk) for rk in rks[:3]]
-        ['0x0', '0x0', '0x0']
-        sage: len(blink_key_schedule(0, a=1, b=1))
-        9
-        sage: len(blink_key_schedule(0, n=128, t=256, key_bytes=160))
-        21
-    """
-    assert n in [64, 128], f"Block size must be 64 or 128, not {n}!"
-    assert t in [64, 128, 256], f"Tweak size {t} not supported!"
-    if key_bytes is None:
-        key_bytes = (n // 8) * (ra_rb_from_n_t(n, t) + 2)
-    state_bytes, tweak_bytes, ra, rb, _, _, _ = _variant_config(n, t, key_bytes)
-    a, b = _check_rounds(a, b, ra, rb)
-
-    # The reference treats the master key and tweak in LSB-first byte order.
-    mk = [(master_key >> (8 * i)) & 0xFF for i in range(key_bytes)]
-    tw = [(tweak >> (8 * i)) & 0xFF for i in range(tweak_bytes)]
-    rk, w, h = _generate_round_key(mk, tw, state_bytes, tweak_bytes, key_bytes)
-
-    # Convert every value to a single integer (LSB-first bytes).
-    rk_int = [_bytes_to_int(rk[r]) for r in range(ra + rb)]
-    w0, w1 = _bytes_to_int(w[0]), _bytes_to_int(w[1])
-    h0, h1 = _bytes_to_int(h[0]), _bytes_to_int(h[1])
-    return [
-        w0,
-        *rk_int[:a],
-        h0,
-        *rk_int[a : a + b],
-        h0 ^ h1,
-        *rk_int[:b],
-        h1,
-        *rk_int[b : a + b],
-        w1,
-    ]
-
-
 def _check_rounds(a, b, ra, rb):
     """Default ``a``, ``b`` to the variant's ``ra``, ``rb`` and check them."""
     if a is None:
@@ -1208,6 +785,181 @@ def _check_rounds(a, b, ra, rb):
         f"for this variant (max {ra + rb})"
     )
     return a, b
+
+
+class BLINK_KeySchedule_CVL(KeySchedule):
+    def __init__(self, n=64, t=64, tweak=0, key_bytes=None, a=None, b=None):
+        r"""
+        The Blink tweakey schedule as a CiVerLy DAG.
+
+        Blink XORs five kinds of key material into the state: the whitening
+        keys ``w0`` / ``w1``, the round keys ``rk[0..a+b-1]`` and the tweak
+        hashes ``h0`` / ``h1`` (``h0 ^ h1`` in the middle stage). They are
+        output in the order in which they occur in the cipher::
+
+            w0, rk[0..a-1], h0, rk[a..a+b-1], h0^h1,
+            rk[0..b-1], h1, rk[b..a+b-1], w1
+
+        i.e. ``2 * (a + b) + 5`` values of ``n`` bits each, matching the
+        ``_rk_components`` of :class:`BLINK_CVL` with the same ``n``, ``t``,
+        ``key_bytes``, ``a`` and ``b``.
+
+        The whitening and round keys are slices of the master key and are
+        wired directly to the output. The tweak is fixed per instance, so
+        each tweak hash is a GF(2)-linear function of the master key: the
+        bit-permuted master key ``k'`` (bit ``q`` of ``k'`` is bit
+        ``11 q mod |k|`` of the master key) is shifted to obtain the hash
+        keys ``hk0`` / ``hk1``, and ``h = H_T(hk)`` is a Toeplitz hash, i.e.
+        bit ``p`` of ``h`` is the parity of ``T & (hk >> (n - p))``. Both
+        hashes share one ``LinearLayer_CVL`` (Toeplitz matrix of the tweak),
+        whose inputs are wired from the master key through the bit
+        permutation and shift; ``h0 ^ h1`` is computed by an ``XOR_CVL``.
+
+        INPUT:
+
+            - ``n`` -- integer (default: ``64``); Block size in bits, ``64``
+              or ``128``.
+
+            - ``t`` -- integer (default: ``64``); Tweak size in bits.
+
+            - ``tweak`` -- integer (default: ``0``); The tweak.
+
+            - ``key_bytes`` -- integer (optional); Master key size in bytes,
+              which selects the variant for ``n = 128`` (``128`` for
+              Blink-128a/b, ``160`` for Blink-128A/B). Defaults to ``56`` for
+              ``n = 64`` and ``128`` for ``n = 128``.
+
+            - ``a``, ``b`` -- integers (optional); Number of outer / inner
+              keyed rounds of the (reduced) cipher, as in :class:`BLINK_CVL`.
+              Default to the standard values of the variant.
+
+        EXAMPLES::
+
+            sage: from civerly.cipher_implementations.blink import (
+            ....:   BLINK_KeySchedule_CVL)
+            sage: ks = BLINK_KeySchedule_CVL(tweak=0x0123456789abcdef)
+            sage: ks.input_length, ks.output_length
+            (448, 960)
+            sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa1
+            sage: rks = ks(key)
+            sage: len(rks)
+            15
+            sage: [hex(rk) for rk in rks]
+            ['0x97779021b38e7fa1',
+             '0x6dd387874a0b52ce',
+             '0x762c2df9de6f0d21',
+             '0xc877d3e5b68357ae',
+             '0xe07c1dc6f302c57e',
+             '0xd1d7dec33a246943',
+             '0xd6a102d888a467e4',
+             '0xd8eac24674a0201e',
+             '0x6dd387874a0b52ce',
+             '0x762c2df9de6f0d21',
+             '0xe07c1dc6f302c57e',
+             '0x109d11a3c22377b0',
+             '0xd1d7dec33a246943',
+             '0xd6a102d888a467e4',
+             '0x3022e0ad78c78a06']
+            sage: rks[0] == key % 2**64 and rks[-1] == (key >> 64) % 2**64
+            True
+            sage: rks[7] == rks[3] ^^ rks[11]  # h0 xor h1
+            True
+            sage: len(BLINK_KeySchedule_CVL(a=1, b=1)(key))
+            9
+            sage: len(BLINK_KeySchedule_CVL(n=128, t=256, key_bytes=160)(0))
+            21
+        """
+        assert n in [64, 128], f"Block size must be 64 or 128, not {n}!"
+        assert t in [64, 128, 256], f"Tweak size {t} not supported!"
+        if key_bytes is None:
+            key_bytes = (n // 8) * (ra_rb_from_n_t(n, t) + 2)
+        state_bytes, tweak_bytes, ra, rb, _, _, _ = _variant_config(n, t, key_bytes)
+        a, b = _check_rounds(a, b, ra, rb)
+
+        K = 8 * key_bytes  # master key bits
+        hk_bits = 8 * (state_bytes + tweak_bytes)  # bits of hk0 / hk1
+        assert 2 * hk_bits - 2 <= K, (
+            f"A {key_bytes}-byte key is too short for n={n}, t={t}"
+        )
+        n_out = 2 * (a + b) + 5
+        super().__init__(K, n * n_out, name=f"Blink-{n}-{t}-KeySchedule")
+        self.tweak = tweak % (1 << t)
+
+        def mk(p):
+            # IN index of bit p of the master key integer (LSB = bit 0).
+            return K - 1 - p
+
+        def kp(q):
+            # IN index of bit q of the bit-permuted key k'.
+            return mk((11 * q) % K)
+
+        # Toeplitz hash h = H_T(hk) as an n x m matrix, m = hk_bits - 1:
+        # h bit p = XOR_{k : T_k = 1} hk bit (n - p + k). Bit 0 of hk is never
+        # used. Input index v <-> hk bit m - v, output index u <-> h bit n-1-u,
+        # so entry (u, v) is T bit m - 1 - u - v.
+        m = hk_bits - 1
+        mat = matrix(GF(2), n, m, 0)
+        for u in range(n):
+            for v in range(max(0, m - u - t), m - u):
+                mat[u, v] = (self.tweak >> (m - 1 - u - v)) & 1
+        hash_layer = LinearLayer_CVL(mat, name="TweakHash")
+
+        # hk0 = k' << 1, hk1 = k' >> (hk_bits - 2) (truncated, bit 0 cleared).
+        h0 = self.add_subcipher(
+            hash_layer, [(self.IN, (kp(m - 1 - v), v)) for v in range(m)]
+        )
+        h1 = self.add_subcipher(
+            hash_layer,
+            [(self.IN, (kp(hk_bits - 2 + m - v), v)) for v in range(m)],
+        )
+        h01 = self.add_subcipher(
+            XOR_CVL(n, name="h0^h1"),
+            [(h0, (i, i)) for i in range(n)] + [(h1, (i, n + i)) for i in range(n)],
+        )
+
+        # Output slots: (source node, offset) with offset the position of the
+        # n-bit value in the master key integer (for slices of the master key).
+        def key_slice(j):
+            return (self.IN, j * n)
+
+        rk = [key_slice(j + 2) for j in range(ra + rb)]
+        slots = (
+            [key_slice(0)]
+            + rk[:a]
+            + [(h0, None)]
+            + rk[a : a + b]
+            + [(h01, None)]
+            + rk[:b]
+            + [(h1, None)]
+            + rk[b : a + b]
+            + [key_slice(1)]
+        )
+        edges = []
+        for s, (node, off) in enumerate(slots):
+            if off is None:
+                edges += [(node, (i, s * n + i)) for i in range(n)]
+            else:
+                edges += [(node, (mk(off + n - 1 - i), s * n + i)) for i in range(n)]
+        self.add_output(edges)
+        self._rk_width = n
+
+    def eval(self, master_key):
+        r"""
+        Expand ``master_key`` into the list of ``2 * (a + b) + 5`` round-key
+        integers of ``n`` bits each (see :class:`BLINK_KeySchedule_CVL`).
+
+        INPUT:
+
+            - ``master_key`` -- integer; The master key.
+
+        OUTPUT: List of integers.
+        """
+        w = self._rk_width
+        bits = Cipher.eval(self, int_to_vec(master_key, self.input_length))
+        return [
+            vec_to_int(bits[i * w : (i + 1) * w])
+            for i in range(self.output_length // w)
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -1248,12 +1000,12 @@ class BLINK_CVL(CipherImplementation_CVL, WordSBoxCipher):
             - ``key_schedule`` -- callable or
               :class:`civerly.keyschedule.KeySchedule` (optional); Key
               schedule used to derive round keys from ``key`` via
-              ``set_round_keys``. Pass :func:`blink_key_schedule` (with ``n``,
-              ``t``, ``tweak`` and ``key_bytes`` fixed via
-              ``functools.partial``) to use the real Blink tweakey schedule,
+              ``set_round_keys``. Pass a :class:`BLINK_KeySchedule_CVL`
+              (with the same ``n``, ``t``, ``key_bytes``, ``a`` and ``b``,
+              and the tweak) to use the real Blink tweakey schedule,
               or :class:`civerly.keyschedule.DefaultKeySchedule_CVL` to pass
               explicit round keys (``2 * (a + b) + 5`` of them, ``n`` bits
-              each, in the order of :func:`blink_key_schedule`). Defaults to
+              each, in the order of :class:`BLINK_KeySchedule_CVL`). Defaults to
               ``None`` (no key schedule, all-zero round keys).
 
             - ``key`` -- integer or list of integers (optional); The master
@@ -1282,7 +1034,7 @@ class BLINK_CVL(CipherImplementation_CVL, WordSBoxCipher):
 
         The number of rounds ``R`` is the number of S-box layers of the
         instance, ``2 * (a + b) + 4``. For a reduced instance, pass the same
-        ``a`` and ``b`` to :func:`blink_key_schedule`.
+        ``a`` and ``b`` to :class:`BLINK_KeySchedule_CVL`.
 
         This cipher is "plug-and-play" usable, i.e. it can be directly used
         when imported.
@@ -1292,33 +1044,32 @@ class BLINK_CVL(CipherImplementation_CVL, WordSBoxCipher):
         The test vectors below are taken from ``documentation/blink test
         vectors.md`` (and agree with ``documentation/blink.py``)::
 
-            sage: from functools import partial
             sage: from civerly.cipher_implementations.blink \
-            ....:   import BLINK_CVL, blink_key_schedule
+            ....:   import BLINK_CVL, BLINK_KeySchedule_CVL
             sage: from civerly.util import int_to_vec, vec_to_int
 
             sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa1
-            sage: ks = partial(blink_key_schedule, tweak=0x0123456789abcdef)
+            sage: ks = BLINK_KeySchedule_CVL(tweak=0x0123456789abcdef)
             sage: blink = BLINK_CVL(64, 64, key_schedule=ks, key=key)
             sage: hex(vec_to_int(blink(int_to_vec(0, 64))))
             '0xa4a0d10502be846e'
 
             sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa1
-            sage: ks = partial(blink_key_schedule, t=128,
+            sage: ks = BLINK_KeySchedule_CVL(t=128,
             ....:   tweak=0x0123456789abcdef0123456789abcdef)
             sage: blink = BLINK_CVL(64, 128, key_schedule=ks, key=key)
             sage: hex(vec_to_int(blink(int_to_vec(0, 64))))
             '0x743e142f17caaae1'
 
             sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa15e2b66350517f80f2961c648d578bae174d70cb769c30a45cc40300fe8a342ca57a0bd0251ae39b621b8f104904374bbd6a102e234a664e421b8f104904374bbd6a102d888a666e4
-            sage: ks = partial(blink_key_schedule, n=128, t=128,
+            sage: ks = BLINK_KeySchedule_CVL(n=128, t=128,
             ....:   tweak=0x0123456789abcdef0123456789abcdef)
             sage: blink = BLINK_CVL(128, 128, key_schedule=ks, key=key)
             sage: hex(vec_to_int(blink(int_to_vec(0, 128))))
             '0xb722eef350bb182074a6ff13c967a593'
 
             sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa15e2b66350517f80f2961c648d578bae174d70cb769c30a45cc40300fe8a342ca57a0bd0251ae39b621b8f104904374bbd6a102e234a664e421b8f104904374bbd6a102d888a666e4
-            sage: ks = partial(blink_key_schedule, n=128, t=256,
+            sage: ks = BLINK_KeySchedule_CVL(n=128, t=256,
             ....:   tweak=0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef)
             sage: blink = BLINK_CVL(128, 256, key_schedule=ks, key=key)
             sage: hex(vec_to_int(blink(int_to_vec(0, 128))))
@@ -1329,14 +1080,14 @@ class BLINK_CVL(CipherImplementation_CVL, WordSBoxCipher):
         the round numbers and constants, and for the key schedule)::
 
             sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa15e2b66350517f80f2961c648d578bae174d70cb769c30a45cc40300fe8a342ca57a0bd0251ae39b621b8f104904374bbd6a102e234a664e421b8f104904374bbd6a102d888a666e428962a4c96893eda752c17026a6395c2d6963be43b2fc10813d73f5a4a48d28d
-            sage: ks = partial(blink_key_schedule, n=128, t=128, key_bytes=160,
+            sage: ks = BLINK_KeySchedule_CVL(n=128, t=128, key_bytes=160,
             ....:   tweak=0x0123456789abcdef0123456789abcdef)
             sage: blink = BLINK_CVL(128, 128, key_bytes=160, key_schedule=ks, key=key)
             sage: hex(vec_to_int(blink(int_to_vec(0, 128))))
             '0x82449f141c183601195b5046eac2b026'
 
             sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa15e2b66350517f80f2961c648d578bae174d70cb769c30a45cc40300fe8a342ca57a0bd0251ae39b621b8f104904374bbd6a102e234a664e421b8f104904374bbd6a102d888a666e428962a4c96893eda752c17026a6395c2d6963be43b2fc10813d73f5a4a48d28d
-            sage: ks = partial(blink_key_schedule, n=128, t=256, key_bytes=160,
+            sage: ks = BLINK_KeySchedule_CVL(n=128, t=256, key_bytes=160,
             ....:   tweak=0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef)
             sage: blink = BLINK_CVL(128, 256, key_bytes=160, key_schedule=ks, key=key)
             sage: hex(vec_to_int(blink(int_to_vec(0, 128))))
@@ -1347,7 +1098,7 @@ class BLINK_CVL(CipherImplementation_CVL, WordSBoxCipher):
 
             sage: from civerly.keyschedule import DefaultKeySchedule_CVL
             sage: key = 0xd6a102d888a467e4d1d7dec33a246943e07c1dc6f302c57e762c2df9de6f0d216dd387874a0b52ce3022e0ad78c78a0697779021b38e7fa1
-            sage: rks = blink_key_schedule(key, tweak=0x0123456789abcdef)
+            sage: rks = BLINK_KeySchedule_CVL(tweak=0x0123456789abcdef)(key)
             sage: blink = BLINK_CVL(
             ....:   64, 64, key_schedule=DefaultKeySchedule_CVL(64, 15), key=rks)
             sage: hex(vec_to_int(blink(int_to_vec(0, 64))))
@@ -1366,7 +1117,7 @@ class BLINK_CVL(CipherImplementation_CVL, WordSBoxCipher):
 
         The key schedule then has to be given the same ``a`` and ``b``::
 
-            sage: ks = partial(blink_key_schedule, tweak=0x0123456789abcdef, a=1, b=1)
+            sage: ks = BLINK_KeySchedule_CVL(tweak=0x0123456789abcdef, a=1, b=1)
             sage: blink = BLINK_CVL(64, 64, key_schedule=ks, key=key, a=1, b=1)
             sage: len(blink._rk_components) == len(ks(key)) == 9
             True
@@ -1400,7 +1151,7 @@ class BLINK_CVL(CipherImplementation_CVL, WordSBoxCipher):
         if key_bytes is None:
             key_bytes = (n // 8) * (ra_rb_from_n_t(n, t) + 2)
 
-        state_bytes, _tweak_bytes, ra, rb, pbox, rc, rc_prime = _variant_config(
+        state_bytes, tweak_bytes, ra, rb, pbox, rc, rc_prime = _variant_config(
             n, t, key_bytes
         )
 

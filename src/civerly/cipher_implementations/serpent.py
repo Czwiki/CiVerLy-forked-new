@@ -12,9 +12,9 @@ final permutation (FP).
 EXAMPLES::
 
     sage: from civerly.cipher_implementations.serpent \
-    ....:   import SERPENT_CVL, serpent_key_schedule
+    ....:   import SERPENT_CVL, SERPENT_KeySchedule_CVL
     sage: from civerly.util import int_to_vec, vec_to_int
-    sage: serpent = SERPENT_CVL(key_schedule=serpent_key_schedule, key=0)
+    sage: serpent = SERPENT_CVL(key_schedule=SERPENT_KeySchedule_CVL(), key=0)
     sage: pt = int('8ED77392F29990EDA7A3A3CE6F579DD2', 16)
     sage: ct = vec_to_int(serpent(int_to_vec(pt, 128)))
     sage: hex(ct)
@@ -27,12 +27,18 @@ from sage.matrix.constructor import Matrix as matrix
 from sage.rings.finite_rings.finite_field_constructor import GF
 
 from civerly.cipher_implementations.base import CipherImplementation_CVL
+from civerly.cipher import Cipher
 from civerly.component import (
+    C_CVL,
+    XOR_CVL,
+    ConstXOR_CVL,
     LinearLayer_CVL,
     PermuteLayer_CVL,
+    RotateLayer_CVL,
     RoundkeyXOR_CVL,
     SBox_CVL,
 )
+from civerly.keyschedule import KeySchedule
 from civerly.sboxcipher import SBoxCipher
 
 PHI = 0x9E3779B9
@@ -304,159 +310,6 @@ FP_TABLE = (
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-def _rotl32(x, n):
-    r"""
-    Rotate left a 32-bit word ``x`` by ``n`` bits.
-
-    INPUT:
-
-        - ``x`` -- integer; The 32-bit word to rotate.
-
-        - ``n`` -- integer; Number of bits to rotate by.
-
-    OUTPUT: The rotated 32-bit word.
-    """
-    x = int(x) & 0xFFFFFFFF
-    n = int(n) % 32
-    return ((x << n) | (x >> (32 - n))) & 0xFFFFFFFF
-
-
-def _apply_perm_int(x, perm):
-    r"""
-    Apply a permutation ``perm`` to the 128-bit integer ``x``.
-
-    Returns a new integer where bit ``p`` is ``x[perm[p]]``.
-    """
-    result = 0
-    for p in range(128):
-        if (x >> perm[p]) & 1:
-            result |= 1 << p
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Key schedule
-# ---------------------------------------------------------------------------
-def serpent_key_schedule(master_key, keylen=128, R=32):
-    r"""
-    Generate round keys for the Serpent block cipher.
-
-    Serpent requires 33 128-bit subkeys. The master key is first padded to
-    256 bits if necessary, then expanded to 132 prekey words via an affine
-    recurrence, and finally transformed by the S-boxes in bitslice mode.
-    After the bitslice round key words are produced, the initial
-    permutation (IP) is applied to each round key to obtain the
-    standard-mode subkeys ``KHat``.
-
-    The round keys are returned as 128-bit integers, in the order of the
-    round-key components of :class:`SERPENT_CVL`, so this function can be
-    passed directly as its ``key_schedule`` (a reduced-round cipher only
-    uses the leading round keys). For a 256-bit key, bind ``keylen`` with
-    :func:`functools.partial`.
-
-    INPUT:
-
-        - ``master_key`` -- integer; The user-supplied master key.
-
-        - ``keylen`` -- integer (default: ``128``); The key length in bits.
-          Must be at most ``256``.
-
-        - ``R`` -- integer (default: ``32``); Number of rounds. The function
-          returns ``R + 1`` round keys.
-
-    OUTPUT: A list of ``R + 1`` round key integers ``K_0, ..., K_R``.
-
-    EXAMPLES::
-
-        sage: from civerly.cipher_implementations.serpent import serpent_key_schedule
-        sage: rks = serpent_key_schedule(0, keylen=128)
-        sage: len(rks)
-        33
-        sage: hex(rks[0])
-        '0xe5749bf3e92d49bf78ad11abf74966b4'
-        sage: hex(rks[1])
-        '0x3e602208886902fcc781325fc60cbddc'
-        sage: hex(rks[2])
-        '0x7d595686772092219d7070d223d44f82'
-
-        sage: rks = serpent_key_schedule(0, keylen=256)
-        sage: hex(rks[0])
-        '0xe5749bf3ef2d49bf78ad41abf7496624'
-        sage: hex(rks[1])
-        '0x3e602208726902fcc7d3c25fc60cb03c'
-        sage: hex(rks[2])
-        '0x7d59567c272092219b4870d223d4d4a2'
-
-    TESTS::
-
-        Verify with the test vector from the NESSIE suite (128-bit key)::
-
-            sage: from civerly.cipher_implementations.serpent \
-            ....:   import serpent_key_schedule
-            sage: key = int("80000000000000000000000000000000", 16)
-            sage: rks = serpent_key_schedule(key, keylen=128)
-            sage: hex(rks[0])
-            '0xe5749bf3e90d49bf78adf0abf74966be'
-            sage: hex(rks[1])
-            '0x3e602208d1a902fcc78b725fc60cbd79'
-            sage: hex(rks[2])
-            '0x7d59568107e092219db790d223d4ab69'
-    """
-    if keylen > 256:
-        raise ValueError("Key length must be at most 256 bits")
-    if R > 32:
-        raise ValueError("Serpent only supports up to 32 rounds")
-
-    key = int(master_key) | 1 << keylen if keylen < 256 else int(master_key)
-
-    # Split 256 key bits into 8 little-endian words.
-    w_init = [(key >> (32 * i)) & 0xFFFFFFFF for i in range(8)]
-
-    # Prekey expansion: w[i] for i = -8 .. 131
-    raw_w = w_init + [0] * 132
-    for i in range(132):
-        raw_w[i + 8] = _rotl32(
-            raw_w[i] ^ raw_w[i + 3] ^ raw_w[i + 5] ^ raw_w[i + 7] ^ PHI ^ i, 11
-        )
-
-    w = raw_w[8:140]
-
-    # Apply bitslice S-boxes to prekeys to obtain 132 round-key words.
-    # S-box sequence for each group of 4 prekey words:
-    # i=0: S3, i=1: S2, i=2: S1, i=3: S0, i=4: S7, ...
-    k = [0] * 132
-    for i in range(33):
-        which_S = (32 + 3 - i) % 32
-        sbox = SERPENT_SBOXES[which_S % 8]
-        for j in range(32):
-            nibble = 0
-            for c in range(4):
-                bit = (w[4 * i + c] >> j) & 1
-                nibble |= bit << c
-            output = int(sbox(nibble))
-            for c in range(4):
-                bit = (output >> c) & 1
-                k[4 * i + c] |= bit << j
-
-    # Pack the 4 words into a 128-bit bitslice integer and apply IP to get
-    # the standard-mode round key KHat.
-    rks = []
-    for i in range(R + 1):
-        packed_bitslice = (
-            (k[4 * i + 3] << 96)
-            | (k[4 * i + 2] << 64)
-            | (k[4 * i + 1] << 32)
-            | k[4 * i]
-        )
-        KHat = _apply_perm_int(packed_bitslice, IP_TABLE)
-        rks.append(KHat)
-
-    return rks
-
-
-# ---------------------------------------------------------------------------
 # S-boxes
 # ---------------------------------------------------------------------------
 SERPENT_SBOXES = [
@@ -630,6 +483,259 @@ def _build_serpent_linear_layer():
 
 
 # ---------------------------------------------------------------------------
+# Key schedule
+# ---------------------------------------------------------------------------
+class SERPENT_KeySchedule_CVL(KeySchedule):
+    def __init__(self, R=32, keylen=128, name="SERPENT-KeySchedule"):
+        r"""
+        The Serpent key schedule as a CiVerLy DAG.
+
+        The ``keylen``-bit master key is padded to 256 bits by appending a
+        single ``1`` bit followed by zeros (above the most significant key
+        bit), and split into eight 32-bit prekey words
+        ``w_{-8}, ..., w_{-1}`` (``w_{-8}`` being the least significant word).
+        The prekeys are expanded by the affine recurrence
+
+        .. MATH::
+
+            w_i = (w_{i-8} \oplus w_{i-5} \oplus w_{i-3} \oplus w_{i-1}
+                   \oplus \phi \oplus i) \lll 11,
+
+        with :math:`\phi` = ``0x9e3779b9``. Round key ``K_i`` is obtained
+        by applying S-box ``S_{(3 - i) mod 8}`` in bitslice mode to the words
+        ``w_{4i}, ..., w_{4i+3}`` and then the initial permutation (IP), i.e.
+        it is the standard-mode subkey ``KHat_i``.
+
+        The DAG consists of ``R + 1`` steps; step ``i`` takes the 256-bit
+        window ``w_{4i-8} || ... || w_{4i-1}`` and outputs the next window
+        ``w_{4i-4} || ... || w_{4i+3}`` together with round key ``K_i``. Each
+        step consists of four prekey-word sub-ciphers (``XOR_CVL``,
+        ``ConstXOR_CVL``, ``RotateLayer_CVL``), a layer of 32 ``SBox_CVL``
+        and a ``PermuteLayer_CVL`` for IP. The constant padding bits are
+        produced by a ``C_CVL`` node.
+
+        The output are the ``R + 1`` round keys of :class:`SERPENT_CVL` with
+        ``R`` rounds, in the order of its round-key components, so an instance
+        can be passed as ``key_schedule`` to :class:`SERPENT_CVL`.
+
+        INPUT:
+
+            - ``R`` -- integer (default: ``32``); Number of rounds of the
+              corresponding :class:`SERPENT_CVL`. The key schedule outputs
+              ``R + 1`` round keys of 128 bits each.
+
+            - ``keylen`` -- integer (default: ``128``); The master key length
+              in bits, ``1 <= keylen <= 256``.
+
+            - ``name`` -- string (default: ``"SERPENT-KeySchedule"``); The
+              name of the key schedule.
+
+        EXAMPLES::
+
+            sage: from civerly.cipher_implementations.serpent \
+            ....:   import SERPENT_KeySchedule_CVL
+            sage: ks = SERPENT_KeySchedule_CVL()
+            sage: (ks.input_length, ks.output_length)
+            (128, 4224)
+            sage: rks = ks(0)
+            sage: len(rks)
+            33
+            sage: hex(rks[0])
+            '0xe5749bf3e92d49bf78ad11abf74966b4'
+            sage: hex(rks[1])
+            '0x3e602208886902fcc781325fc60cbddc'
+            sage: hex(rks[2])
+            '0x7d595686772092219d7070d223d44f82'
+
+            sage: rks = SERPENT_KeySchedule_CVL(R=2, keylen=256)(0)
+            sage: len(rks)
+            3
+            sage: hex(rks[0])
+            '0xe5749bf3ef2d49bf78ad41abf7496624'
+            sage: hex(rks[1])
+            '0x3e602208726902fcc7d3c25fc60cb03c'
+            sage: hex(rks[2])
+            '0x7d59567c272092219b4870d223d4d4a2'
+
+        TESTS:
+
+        Verify with the test vector from the NESSIE suite (128-bit key)::
+
+            sage: from civerly.cipher_implementations.serpent \
+            ....:   import SERPENT_KeySchedule_CVL
+            sage: key = int("80000000000000000000000000000000", 16)
+            sage: rks = SERPENT_KeySchedule_CVL(R=2)(key)
+            sage: hex(rks[0])
+            '0xe5749bf3e90d49bf78adf0abf74966be'
+            sage: hex(rks[1])
+            '0x3e602208d1a902fcc78b725fc60cbd79'
+            sage: hex(rks[2])
+            '0x7d59568107e092219db790d223d4ab69'
+
+        Invalid parameters are rejected::
+
+            sage: SERPENT_KeySchedule_CVL(R=33)
+            Traceback (most recent call last):
+            ...
+            ValueError: Serpent only supports up to 32 rounds
+            sage: SERPENT_KeySchedule_CVL(keylen=257)
+            Traceback (most recent call last):
+            ...
+            ValueError: Key length must be at most 256 bits
+        """
+        if keylen > 256:
+            raise ValueError("Key length must be at most 256 bits")
+        if keylen < 1:
+            raise ValueError("Key length must be positive")
+        if R > 32:
+            raise ValueError("Serpent only supports up to 32 rounds")
+
+        super().__init__(keylen, 128 * (R + 1), name=name)
+        self._R = R
+
+        # The 256-bit window w_{base} || ... || w_{base+7} is laid out as the
+        # integer sum(w_{base+s} << 32 * s), i.e. slot s occupies the
+        # (MSB-first) bits 32 * (7 - s) .. 32 * (7 - s) + 31. The padded key
+        # is exactly the initial window w_{-8} .. w_{-1}: the key occupies the
+        # last ``keylen`` bits, preceded by the padding constant 0...01.
+        if keylen < 256:
+            pad = self.add_subcipher(C_CVL(256 - keylen, 1, name="KeyPadding"), [])
+            window = [(pad, j) for j in range(256 - keylen)]
+            window += [(self.IN, j) for j in range(keylen)]
+        else:
+            window = [(self.IN, j) for j in range(256)]
+
+        # The permutation layers are built once and shared by all steps
+        # (``add_subcipher`` copies them), as their construction is costly.
+        rot = RotateLayer_CVL(32, 11, name="ROTL11")
+        ip_perm = [0] * 128
+        for p in range(128):
+            ip_perm[127 - IP_TABLE[p]] = 127 - p
+        ip = PermuteLayer_CVL(ip_perm, name="KS-IP")
+
+        output_edges = []
+        for i in range(R + 1):
+            step = self.add_subcipher(
+                self._make_ks_step(i, rot, ip),
+                [(src, (j, k)) for k, (src, j) in enumerate(window)],
+            )
+            window = [(step, j) for j in range(256)]
+            output_edges += [(step, (256 + j, 128 * i + j)) for j in range(128)]
+
+        self.add_output(output_edges)
+
+    def eval(self, master_key):
+        r"""
+        Expand ``master_key`` into the list of ``R + 1`` round-key integers.
+
+        INPUT:
+
+            - ``master_key`` -- integer; The ``keylen``-bit master key.
+
+        OUTPUT: List of ``R + 1`` 128-bit integers ``K_0, ..., K_R``.
+        """
+        from civerly.util import int_to_vec, vec_to_int
+
+        bits = Cipher.eval(self, int_to_vec(master_key, self.input_length))
+        return [vec_to_int(bits[128 * i : 128 * (i + 1)]) for i in range(self._R + 1)]
+
+    @staticmethod
+    def _make_prekey_word(index, rot):
+        r"""
+        One prekey word ``w_index`` as an ``SBoxCipher(128 -> 32)``; ``rot``
+        is the rotation-by-11 layer.
+
+        Takes ``w_{index-8} || w_{index-5} || w_{index-3} || w_{index-1}`` and
+        outputs ``(w_{index-8} ^ w_{index-5} ^ w_{index-3} ^ w_{index-1}
+        ^ phi ^ index) <<< 11``.
+        """
+        word = SBoxCipher(128, 32, name=f"w{index}")
+        node = word.add_subcipher(
+            XOR_CVL(32, name=f"w{index}_XOR0"),
+            [(word.IN, (j, j)) for j in range(64)],
+        )
+        for t in (2, 3):
+            node = word.add_subcipher(
+                XOR_CVL(32, name=f"w{index}_XOR{t - 1}"),
+                [(node, (j, j)) for j in range(32)]
+                + [(word.IN, (32 * t + j, 32 + j)) for j in range(32)],
+            )
+        node = word.add_subcipher(
+            ConstXOR_CVL(32, PHI ^ index, name=f"w{index}_const"),
+            [(node, (j, j)) for j in range(32)],
+        )
+        node = word.add_subcipher(
+            rot,
+            [(node, (j, j)) for j in range(32)],
+        )
+        word.add_output([(node, (j, j)) for j in range(32)])
+        return word
+
+    @staticmethod
+    def _make_ks_step(i, rot, ip):
+        r"""
+        Key-schedule step ``i`` as an ``SBoxCipher(256 -> 384)``; ``rot`` is
+        the rotation-by-11 layer and ``ip`` the initial permutation layer.
+
+        Input: the window ``w_{4i-8} .. w_{4i-1}``. Output: the next window
+        ``w_{4i-4} .. w_{4i+3}`` (bits ``0 .. 255``), followed by round key
+        ``K_i`` (bits ``256 .. 383``).
+        """
+        step = SBoxCipher(256, 384, name=f"KS-step{i}")
+
+        def slot(s):
+            # MSB-first offset of window slot s
+            return 32 * (7 - s)
+
+        # Sources of window slots 0 .. 11: slots 0 .. 7 are the input,
+        # slots 8 .. 11 the newly computed words w_{4i} .. w_{4i+3}.
+        sources = [(step.IN, slot(s)) for s in range(8)]
+        for c in range(4):
+            srcs = [sources[c + d] for d in (0, 3, 5, 7)]
+            node = step.add_subcipher(
+                SERPENT_KeySchedule_CVL._make_prekey_word(4 * i + c, rot),
+                [(a, (off + j, 32 * t + j)) for t, (a, off) in enumerate(srcs)
+                 for j in range(32)],
+            )
+            sources.append((node, 0))
+
+        # Bitslice S-box S_{(3 - i) mod 8}: nibble j consists of bit j (LSB
+        # first) of w_{4i+3}, ..., w_{4i} (MSB first), and its output bit c
+        # is bit j of the bitslice word c, i.e. bit 32 * c + j of the packed
+        # 128-bit value w'_{4i+3} || ... || w'_{4i}.
+        sbox_idx = (3 - i) % 8
+        sboxlayer = SBoxCipher(128, 128, name=f"KS-SBoxLayer{i}")
+        sb_out = []
+        for j in range(32):
+            sb = sboxlayer.add_subcipher(
+                SBox_CVL(SERPENT_SBOXES[sbox_idx], name=f"KS-S{sbox_idx}_{i}_{j}"),
+                [(sboxlayer.IN, (32 * k + 31 - j, k)) for k in range(4)],
+            )
+            sb_out += [(sb, (k, 32 * k + 31 - j)) for k in range(4)]
+        sboxlayer.add_output(sb_out)
+        node_sb = step.add_subcipher(
+            sboxlayer,
+            [(a, (off + j, 32 * (3 - c) + j)) for c, (a, off) in
+             enumerate(sources[8:]) for j in range(32)],
+        )
+
+        # Initial permutation: KHat bit p is bit IP_TABLE[p] of the packed
+        # bitslice value (LSB-first numbering).
+        node_ip = step.add_subcipher(
+            ip,
+            [(node_sb, (j, j)) for j in range(128)],
+        )
+
+        out = []
+        for s in range(8):
+            a, off = sources[s + 4]
+            out += [(a, (off + j, slot(s) + j)) for j in range(32)]
+        out += [(node_ip, (j, 256 + j)) for j in range(128)]
+        step.add_output(out)
+        return step
+
+
+# ---------------------------------------------------------------------------
 # Main cipher class
 # ---------------------------------------------------------------------------
 class SERPENT_CVL(CipherImplementation_CVL, SBoxCipher):
@@ -655,9 +761,10 @@ class SERPENT_CVL(CipherImplementation_CVL, SBoxCipher):
             - ``key_schedule`` -- callable or
               :class:`civerly.keyschedule.KeySchedule` (optional); Key
               schedule used to derive round keys from ``key`` via
-              ``set_round_keys``. Pass :func:`serpent_key_schedule` to use the
-              real Serpent key schedule (128-bit keys; bind ``keylen`` with
-              :func:`functools.partial` for other key lengths), or
+              ``set_round_keys``. Pass an instance of
+              :class:`SERPENT_KeySchedule_CVL` (with the same ``R``) to use the
+              real Serpent key schedule (select the key length via its
+              ``keylen`` argument), or
               :class:`civerly.keyschedule.DefaultKeySchedule_CVL` to pass
               explicit round keys (``R + 1`` of them, 128 bits each).
               Defaults to ``None`` (no key schedule, all-zero round keys).
@@ -682,9 +789,10 @@ class SERPENT_CVL(CipherImplementation_CVL, SBoxCipher):
         with KEYSIZE=128, KEY=0 from ``ecb_tbl_precomputed.txt``::
 
             sage: from civerly.cipher_implementations.serpent \
-            ....:   import SERPENT_CVL, serpent_key_schedule
+            ....:   import SERPENT_CVL, SERPENT_KeySchedule_CVL
             sage: from civerly.util import int_to_vec, vec_to_int
-            sage: serpent = SERPENT_CVL(key_schedule=serpent_key_schedule, key=0)
+            sage: ks = SERPENT_KeySchedule_CVL()
+            sage: serpent = SERPENT_CVL(key_schedule=ks, key=0)
             sage: pt1 = int('8ED77392F29990EDA7A3A3CE6F579DD2', 16)
             sage: hex(vec_to_int(serpent(int_to_vec(pt1, 128))))
             '0x2d99fd0696ced14886b0e88a968b28b2'
@@ -699,19 +807,18 @@ class SERPENT_CVL(CipherImplementation_CVL, SBoxCipher):
         :class:`civerly.keyschedule.DefaultKeySchedule_CVL`::
 
             sage: from civerly.keyschedule import DefaultKeySchedule_CVL
-            sage: rks = serpent_key_schedule(0)
+            sage: rks = ks(0)
             sage: serpent = SERPENT_CVL(
             ....:   key_schedule=DefaultKeySchedule_CVL(128, 33), key=rks)
             sage: hex(vec_to_int(serpent(int_to_vec(pt1, 128))))
             '0x2d99fd0696ced14886b0e88a968b28b2'
 
-        Other key lengths are selected by binding ``keylen``::
+        Other key lengths are selected via ``keylen``::
 
-            sage: from functools import partial
-            sage: ks256 = partial(serpent_key_schedule, keylen=256)
+            sage: ks256 = SERPENT_KeySchedule_CVL(keylen=256)
             sage: serpent = SERPENT_CVL(key_schedule=ks256, key=0)
             sage: ct = serpent(int_to_vec(pt1, 128))
-            sage: rks = serpent_key_schedule(0, keylen=256)
+            sage: rks = ks256(0)
             sage: serpent = SERPENT_CVL(
             ....:   key_schedule=DefaultKeySchedule_CVL(128, 33), key=rks)
             sage: serpent(int_to_vec(pt1, 128)) == ct
@@ -719,14 +826,16 @@ class SERPENT_CVL(CipherImplementation_CVL, SBoxCipher):
 
         Instantiate with a master key (round keys are derived automatically)::
 
-            sage: serpent = SERPENT_CVL(R=1, key_schedule=serpent_key_schedule, key=0)
+            sage: ks1 = SERPENT_KeySchedule_CVL(R=1)
+            sage: serpent = SERPENT_CVL(R=1, key_schedule=ks1, key=0)
             sage: result = serpent(int_to_vec(0x0, 128))
             sage: vec_to_int(result) > 0
             True
 
         A reduced-round cipher (R=7) ends with the final key XOR and FP::
 
-            sage: serpent = SERPENT_CVL(R=7, key_schedule=serpent_key_schedule, key=0)
+            sage: ks7 = SERPENT_KeySchedule_CVL(R=7)
+            sage: serpent = SERPENT_CVL(R=7, key_schedule=ks7, key=0)
             sage: names = [n.name for n in serpent.nodes]
             sage: 'FP' in names
             True

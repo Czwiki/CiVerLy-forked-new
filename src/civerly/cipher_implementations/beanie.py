@@ -6,276 +6,295 @@ from sage.matrix.special import block_matrix, identity_matrix
 from sage.rings.finite_rings.finite_field_constructor import GF
 
 from civerly.aeslike import AESlike
+from civerly.cipher import Cipher
 from civerly.cipher_implementations.base import CipherImplementation_CVL
 from civerly.component import (
+    XOR_CVL,
+    ConstXOR_CVL,
     LinearLayer_CVL,
     PermuteLayer_CVL,
     RoundkeyXOR_CVL,
     SBox_CVL,
 )
+from civerly.keyschedule import KeySchedule
+from civerly.sboxcipher import SBoxCipher
+from civerly.util import int_to_vec, vec_to_int
 
 # ---------------------------------------------------------------------------
-# Helpers for the BEANIE tweak-key schedule
+# BEANIE tweak-key schedule
 # ---------------------------------------------------------------------------
 
 _SBOX = (0, 4, 2, 11, 10, 12, 9, 8, 5, 15, 13, 3, 7, 1, 6, 14)
 
+# Round constants of the tweak-key schedule (the left 64-bit half of every
+# constant is zero, so only the right half is listed).
 _ROUND_CONSTANTS = (
-    (0x0, 0x0000000000000000),
-    (0x0, 0x13198A2E03707344),
-    (0x0, 0xA4093822299F31D0),
-    (0x0, 0x082EFA98EC4E6C89),
-    (0x0, 0x452821E638D01377),
-    (0x0, 0xBE5466CF34E90C6C),
-    (0x0, 0x7EF84F78FD955CB1),
-    (0x0, 0x85840851F1AC43AA),
-    (0x0, 0xC882D32F25323C54),
-    (0x0, 0x64A51195E0E3610D),
+    0x0000000000000000,
+    0x13198A2E03707344,
+    0xA4093822299F31D0,
+    0x082EFA98EC4E6C89,
+    0x452821E638D01377,
+    0xBE5466CF34E90C6C,
+    0x7EF84F78FD955CB1,
+    0x85840851F1AC43AA,
+    0xC882D32F25323C54,
+    0x64A51195E0E3610D,
 )
 
-
-def _sbox64(state):
-    output = 0
-    for shift in range(0, 64, 4):
-        output |= _SBOX[(state >> shift) & 0xF] << shift
-    return output & 0xFFFFFFFFFFFFFFFF
+_MASK64 = 0xFFFFFFFFFFFFFFFF
 
 
-def _prince_m_0(column):
-    c0 = (column >> 12) & 0xF
-    c1 = (column >> 8) & 0xF
-    c2 = (column >> 4) & 0xF
-    c3 = column & 0xF
-    return (
-        (((c0 & 0x7) ^ (c1 & 0xB) ^ (c2 & 0xD) ^ (c3 & 0xE)) << 12)
-        | (((c0 & 0xB) ^ (c1 & 0xD) ^ (c2 & 0xE) ^ (c3 & 0x7)) << 8)
-        | (((c0 & 0xD) ^ (c1 & 0xE) ^ (c2 & 0x7) ^ (c3 & 0xB)) << 4)
-        | (((c0 & 0xE) ^ (c1 & 0x7) ^ (c2 & 0xB) ^ (c3 & 0xD)) << 0)
-    ) & 0xFFFF
-
-
-def _prince_m_1(column):
-    c0 = (column >> 12) & 0xF
-    c1 = (column >> 8) & 0xF
-    c2 = (column >> 4) & 0xF
-    c3 = column & 0xF
-    return (
-        (((c0 & 0xB) ^ (c1 & 0xD) ^ (c2 & 0xE) ^ (c3 & 0x7)) << 12)
-        | (((c0 & 0xD) ^ (c1 & 0xE) ^ (c2 & 0x7) ^ (c3 & 0xB)) << 8)
-        | (((c0 & 0xE) ^ (c1 & 0x7) ^ (c2 & 0xB) ^ (c3 & 0xD)) << 4)
-        | (((c0 & 0x7) ^ (c1 & 0xB) ^ (c2 & 0xD) ^ (c3 & 0xE)) << 0)
-    ) & 0xFFFF
-
-
-def _prince_m(state):
-    left, right = state
-    left_columns = [
-        left & 0xFFFF,
-        (left >> 16) & 0xFFFF,
-        (left >> 32) & 0xFFFF,
-        (left >> 48) & 0xFFFF,
-    ]
-    right_columns = [
-        right & 0xFFFF,
-        (right >> 16) & 0xFFFF,
-        (right >> 32) & 0xFFFF,
-        (right >> 48) & 0xFFFF,
-    ]
-    left_columns = [
-        _prince_m_0(left_columns[0]),
-        _prince_m_1(left_columns[1]),
-        _prince_m_1(left_columns[2]),
-        _prince_m_0(left_columns[3]),
-    ]
-    right_columns = [
-        _prince_m_0(right_columns[0]),
-        _prince_m_1(right_columns[1]),
-        _prince_m_1(right_columns[2]),
-        _prince_m_0(right_columns[3]),
-    ]
-    left_out = 0
-    right_out = 0
-    for index, column in enumerate(left_columns):
-        left_out |= column << (16 * index)
-    for index, column in enumerate(right_columns):
-        right_out |= column << (16 * index)
-    return left_out & 0xFFFFFFFFFFFFFFFF, right_out & 0xFFFFFFFFFFFFFFFF
-
-
-def _prince_shift(state):
-    shifted = state & 0xF000F000F000F000
-    for index in range(1, 4):
-        row = state & (0xF000F000F000F000 >> (4 * index))
-        shifted |= (row << (index * 16)) | (row >> (64 - index * 16))
-    return shifted & 0xFFFFFFFFFFFFFFFF
-
-
-def _feistel(state):
-    left, right = state
-    words = [
-        left & 0xFFFFFFFF,
-        (left >> 32) & 0xFFFFFFFF,
-        right & 0xFFFFFFFF,
-        (right >> 32) & 0xFFFFFFFF,
-    ]
-    new_words = [0, 0, 0, 0]
-    new_words[0] = words[3]
-    new_words[1] = words[1] ^ words[0]
-    new_words[2] = words[1]
-    new_words[3] = words[3] ^ words[2]
-    return (
-        ((new_words[1] & 0xFFFFFFFF) << 32) | (new_words[0] & 0xFFFFFFFF),
-        ((new_words[3] & 0xFFFFFFFF) << 32) | (new_words[2] & 0xFFFFFFFF),
-    )
-
-
-def _tks_shift(state):
-    left, right = state
-    new_left = 0
-    new_right = 0
-
-    new_left |= left & 0xF000F000F000F000
-    new_right |= right & 0xF000F000F000F000
-
-    new_left |= ((left & 0x000000000F000F00) << 32) | (
-        (right & 0x0F000F0000000000) >> 32
-    )
-    new_right |= ((right & 0x000000000F000F00) << 32) | (
-        (left & 0x0F000F0000000000) >> 32
-    )
-
-    new_left |= right & 0x00F000F000F000F0
-    new_right |= left & 0x00F000F000F000F0
-
-    new_left |= ((left & 0x000F000F00000000) >> 32) | (
-        (right & 0x00000000000F000F) << 32
-    )
-    new_right |= ((right & 0x000F000F00000000) >> 32) | (
-        (left & 0x00000000000F000F) << 32
-    )
-
-    return new_left & 0xFFFFFFFFFFFFFFFF, new_right & 0xFFFFFFFFFFFFFFFF
-
-
-def _tweak_key_schedule(key, tweak, rounds):
-    if rounds == 0:
-        return tweak
-
-    left, right = tweak
-    key_left, key_right = key
-
-    for round_index in range(rounds):
-        left ^= key_left
-        right ^= key_right
-
-        rc_left, rc_right = _ROUND_CONSTANTS[round_index]
-        left ^= rc_left
-        right ^= rc_right
-
-        left = _sbox64(left)
-        right = _sbox64(right)
-
-        left, right = _prince_m((left, right))
-        left = _prince_shift(left)
-        right = _prince_shift(right)
-        left, right = _feistel((left, right))
-        left, right = _tks_shift((left, right))
-
-    left ^= key_left
-    right ^= key_right
-
-    rc_left, rc_right = _ROUND_CONSTANTS[rounds]
-    left ^= rc_left
-    right ^= rc_right
-    return left & 0xFFFFFFFFFFFFFFFF, right & 0xFFFFFFFFFFFFFFFF
-
-
-def _key_expansion(key, nr_keys):
-    if nr_keys <= 3:
-        raise AssertionError
-
-    left, right = key
-    key_words = [
-        (left >> 32) & 0xFFFFFFFF,
-        left & 0xFFFFFFFF,
-        (right >> 32) & 0xFFFFFFFF,
-        right & 0xFFFFFFFF,
-    ]
-
-    round_keys = [0] * nr_keys
-    round_keys[0] = key_words[0]
-    round_keys[1] = key_words[1]
-    round_keys[2] = key_words[2]
-    round_keys[3] = key_words[3]
-
-    if nr_keys > 4:
-        round_keys[4] = round_keys[0] ^ round_keys[1]
-    if nr_keys > 5:
-        round_keys[5] = round_keys[2] ^ round_keys[3]
-    if nr_keys > 6:
-        round_keys[6] = round_keys[0] ^ round_keys[2]
-    if nr_keys > 7:
-        round_keys[7] = round_keys[1] ^ round_keys[3]
-    if nr_keys > 8:
-        round_keys[8] = round_keys[0] ^ round_keys[3]
-    if nr_keys > 9:
-        round_keys[9] = round_keys[1] ^ round_keys[2]
-
-    return round_keys
-
-
-def _split128(value):
+def _to_int128(value):
+    r"""
+    Convert a 128-bit integer or a pair ``(left, right)`` of 64-bit integers
+    (``left`` being the low half) into a 128-bit integer.
+    """
     if isinstance(value, Integral):  # also covers Sage integers
-        value = int(value)
-        return (value & 0xFFFFFFFFFFFFFFFF, (value >> 64) & 0xFFFFFFFFFFFFFFFF)
+        return int(value) & ((1 << 128) - 1)
     try:
         left, right = value
     except Exception as exc:
         raise ValueError(
             "master_key and tweak must be 128-bit integers or pairs of 64-bit integers"
         ) from exc
-    return (int(left) & 0xFFFFFFFFFFFFFFFF, int(right) & 0xFFFFFFFFFFFFFFFF)
+    return (int(left) & _MASK64) | ((int(right) & _MASK64) << 64)
 
 
-def beanie_key_schedule(master_key, tweak=0, rounds=5):
+def _prince_m_matrix(shift):
     r"""
-    Derive the BEANIE round keys from a 128-bit master key and a 128-bit
-    tweak with the BEANIE tweak-key schedule.
-
-    INPUT:
-
-        - ``master_key`` -- integer or pair of 64-bit integers; the 128-bit
-          master key.
-
-        - ``tweak`` -- integer or pair of 64-bit integers (default: ``0``);
-          the 128-bit tweak.
-
-        - ``rounds`` -- integer (default: ``5``); number of encryption rounds
-          ``R`` of the cipher the round keys are used for.
-
-    OUTPUT: list of ``rounds + 1`` 32-bit round keys (round key 0 first), in
-    the order of ``BEANIE_CVL._rk_components``.
-
-    To use a non-zero tweak or a different number of rounds with
-    :class:`BEANIE_CVL`, fix these parameters with :func:`functools.partial`
-    (see the examples of :class:`BEANIE_CVL`).
-
-    EXAMPLES::
-
-        sage: from civerly.cipher_implementations.beanie \
-        ....:   import beanie_key_schedule
-        sage: rks = beanie_key_schedule((0, 0), tweak=(0, 0))
-        sage: print(" ".join(f"{k:08x}" for k in rks))
-        beedff0f f8a29afc 9369ab08 7391f5d3 464f65f3 e0f85edb
-        sage: beanie_key_schedule(0) == beanie_key_schedule((0, 0), (0, 0), 5)
-        True
-        sage: len(beanie_key_schedule(0, rounds=3))
-        4
+    Return the :math:`16 \times 16` binary matrix of the PRINCE block
+    :math:`\hat{M}^{(0)}` (``shift=0``) or :math:`\hat{M}^{(1)}` (``shift=1``)
+    in the MSB-first bit order of :func:`civerly.util.int_to_vec`.
     """
-    key = _split128(master_key)
-    t_in = _split128(tweak)
-    scheduled = _tweak_key_schedule(key, t_in, rounds)
-    return _key_expansion(scheduled, rounds + 1)
+    masks = (0x7, 0xB, 0xD, 0xE)
+    blocks = [
+        [
+            matrix.diagonal(
+                GF(2), [(masks[(i + j + shift) % 4] >> (3 - b)) & 1 for b in range(4)]
+            )
+            for j in range(4)
+        ]
+        for i in range(4)
+    ]
+    return block_matrix(GF(2), blocks, subdivide=False)
+
+
+class BEANIE_KeySchedule_CVL(KeySchedule):
+    def __init__(self, R=5, tweak=0, name="BEANIE-KeySchedule"):
+        r"""
+        The BEANIE tweak-key schedule as a CiVerLy DAG.
+
+        Takes a 128-bit master key and derives the :math:`R+1` 32-bit round
+        keys of :class:`BEANIE_CVL` (normal mode, ``R`` rounds) for the fixed
+        128-bit ``tweak``. The tweak is processed together with the key by
+        ``R`` rounds of a PRINCE-like 128-bit permutation, and the round keys
+        are linear combinations of the four 32-bit words of the result.
+
+        INPUT:
+
+            - ``R`` -- integer (default: ``5``); number of encryption rounds
+              of the cipher the round keys are used for (:math:`3 \le R \le 9`).
+
+            - ``tweak`` -- integer or pair of 64-bit integers (default: ``0``);
+              the 128-bit tweak. A pair ``(left, right)`` stands for the
+              integer ``left + 2^64 * right``.
+
+            - ``name`` -- string (default: ``"BEANIE-KeySchedule"``); the name
+              of the key schedule.
+
+        The master key passed to the key schedule is a 128-bit integer or,
+        like the tweak, a pair of 64-bit integers. The output is the list of
+        :math:`R+1` round keys (round key 0 first) in the order of
+        ``BEANIE_CVL._rk_components``, the last one being the final whitening
+        key.
+
+        EXAMPLES:
+
+        Reproduce the round keys of the official test vector (Table 15,
+        ``rks1``)::
+
+            sage: from civerly.cipher_implementations.beanie import (
+            ....:   BEANIE_KeySchedule_CVL)
+            sage: ks = BEANIE_KeySchedule_CVL(R=5, tweak=(0, 0))
+            sage: rks = ks((0, 0))
+            sage: print(" ".join(f"{k:08x}" for k in rks))
+            beedff0f f8a29afc 9369ab08 7391f5d3 464f65f3 e0f85edb
+            sage: ks(0) == BEANIE_KeySchedule_CVL()(0) == rks
+            True
+            sage: len(BEANIE_KeySchedule_CVL(R=3)(0))
+            4
+            sage: ks.input_length, ks.output_length
+            (128, 192)
+
+        Use it as the key schedule of :class:`BEANIE_CVL`::
+
+            sage: from civerly.cipher_implementations.beanie import (
+            ....:   BEANIE_CVL, BEANIE_KeySchedule_CVL)
+            sage: from civerly.util import int_to_vec, vec_to_int
+            sage: beanie = BEANIE_CVL(
+            ....:   R=5, key_schedule=BEANIE_KeySchedule_CVL(R=5), key=0)
+            sage: hex(vec_to_int(beanie(int_to_vec(0x00000000, 32))))
+            '0xda46f4d3'
+
+        TESTS::
+
+            sage: from civerly.cipher_implementations.beanie import (
+            ....:   BEANIE_KeySchedule_CVL)
+            sage: BEANIE_KeySchedule_CVL(R=2)
+            Traceback (most recent call last):
+            ...
+            ValueError: the BEANIE key schedule supports 3 <= R <= 9, got R=2
+            sage: BEANIE_KeySchedule_CVL(tweak="t")
+            Traceback (most recent call last):
+            ...
+            ValueError: master_key and tweak must be 128-bit integers or pairs ...
+        """
+        if not 3 <= R <= 9:
+            raise ValueError(
+                f"the BEANIE key schedule supports 3 <= R <= 9, got R={R}"
+            )
+        tweak = _to_int128(tweak)
+        super().__init__(128, 32 * (R + 1), name=name)
+        self._R = R
+        self._tweak = tweak
+
+        # State layout (MSB first): right half (bits 0..63) | left half
+        # (bits 64..127), i.e. the 128-bit integer ``right * 2^64 + left``.
+        # The master key and the tweak use the same layout.
+        # First key addition: state = K ^ T.
+        node = self.add_subcipher(
+            ConstXOR_CVL(128, tweak, name="Tweak"),
+            [(self.IN, (i, i)) for i in range(128)],
+        )
+        for r in range(R):
+            node = self.add_subcipher(
+                self._make_round(r), [(node, (i, i)) for i in range(128)]
+            )
+            node = self.add_subcipher(
+                XOR_CVL(128, name=f"KeyAdd{r + 1}"),
+                [(node, (i, i)) for i in range(128)]
+                + [(self.IN, (i, 128 + i)) for i in range(128)],
+            )
+        node = self.add_subcipher(
+            ConstXOR_CVL(128, _ROUND_CONSTANTS[R] << 64, name=f"RC{R}"),
+            [(node, (i, i)) for i in range(128)],
+        )
+
+        # Key expansion: the 32-bit words (MSB first) of the scheduled
+        # tweak-key are W[0] = bits 64..95, W[1] = bits 96..127,
+        # W[2] = bits 0..31, W[3] = bits 32..63. Round keys 0..3 are the
+        # words, round keys 4..9 are XORs of pairs of words.
+        word_offsets = [64, 96, 0, 32]
+        xor_pairs = [(0, 1), (2, 3), (0, 2), (1, 3), (0, 3), (1, 2)]
+        output_edges = []
+        for k in range(R + 1):
+            if k < 4:
+                src, off = node, word_offsets[k]
+            else:
+                a, b = xor_pairs[k - 4]
+                src = self.add_subcipher(
+                    XOR_CVL(32, name=f"RK{k}"),
+                    [(node, (word_offsets[a] + i, i)) for i in range(32)]
+                    + [(node, (word_offsets[b] + i, 32 + i)) for i in range(32)],
+                )
+                off = 0
+            output_edges += [(src, (off + i, 32 * k + i)) for i in range(32)]
+        self.add_output(output_edges)
+
+    @staticmethod
+    def _make_round(r):
+        r"""
+        Round ``r`` of the tweak-key schedule (without the following key
+        addition) as an ``SBoxCipher(128, 128)``:
+
+            RC -> SBoxes -> PRINCE M' -> PRINCE ShiftRows -> Feistel -> Shuffle
+        """
+        step = SBoxCipher(128, 128, name=f"TKS-round{r}")
+
+        node_rc = step.add_subcipher(
+            ConstXOR_CVL(128, _ROUND_CONSTANTS[r] << 64, name=f"RC{r}"),
+            [(step.IN, (i, i)) for i in range(128)],
+        )
+
+        sbox = SBox_CVL(SBox(_SBOX), name="SBox")
+        sb_nodes = [
+            step.add_subcipher(sbox, [(node_rc, (4 * j + i, i)) for i in range(4)])
+            for j in range(32)
+        ]
+
+        # PRINCE M' on each 64-bit half: the four 16-bit columns (MSB first)
+        # are multiplied with M^(0), M^(1), M^(1), M^(0).
+        m_0 = LinearLayer_CVL(_prince_m_matrix(0), name="M0")
+        m_1 = LinearLayer_CVL(_prince_m_matrix(1), name="M1")
+        m_nodes = [
+            step.add_subcipher(
+                (m_0, m_1, m_1, m_0)[c % 4],
+                [(sb_nodes[4 * c + i // 4], (i % 4, i)) for i in range(16)],
+            )
+            for c in range(8)
+        ]
+
+        # PRINCE ShiftRows on each half: nibble row ``row`` of the 16-bit
+        # columns is rotated by ``row`` columns (integer bit b -> b + 16 row).
+        shift_perm = []
+        for p in range(128):
+            b = 63 - p % 64
+            row = 3 - (b % 16) // 4
+            shift_perm.append(64 * (p // 64) + 63 - (b + 16 * row) % 64)
+        node_shift = step.add_subcipher(
+            PermuteLayer_CVL(shift_perm, name="ShiftRows"),
+            [(m_nodes[i // 16], (i % 16, i)) for i in range(128)],
+        )
+
+        # Feistel on the 32-bit words (w3, w2, w1, w0) (MSB first):
+        # (w3, w2, w1, w0) -> (w3 ^ w2, w1, w1 ^ w0, w3).
+        node_x_right = step.add_subcipher(
+            XOR_CVL(32, name="Feistel_R"),
+            [(node_shift, (i, i)) for i in range(64)],
+        )
+        node_x_left = step.add_subcipher(
+            XOR_CVL(32, name="Feistel_L"),
+            [(node_shift, (64 + i, i)) for i in range(64)],
+        )
+
+        # Nibble shuffle between and within the two halves.
+        shuffle_perm = [None] * 128
+        for b in range(128):
+            half, col, row = b // 64, (b % 64) // 16, 3 - (b % 16) // 4
+            if row == 1:
+                half, col = (half, col + 2) if col < 2 else (1 - half, col - 2)
+            elif row == 2:
+                half = 1 - half
+            elif row == 3:
+                half, col = (half, col - 2) if col >= 2 else (1 - half, col + 2)
+            dest = 64 * half + 16 * col + b % 16
+            shuffle_perm[127 - b] = 127 - dest
+        node_shuffle = step.add_subcipher(
+            PermuteLayer_CVL(shuffle_perm, name="Shuffle"),
+            [(node_x_right, (i, i)) for i in range(32)]
+            + [(node_shift, (64 + i, 32 + i)) for i in range(32)]
+            + [(node_x_left, (i, 64 + i)) for i in range(32)]
+            + [(node_shift, (i, 96 + i)) for i in range(32)],
+        )
+        step.add_output([(node_shuffle, (i, i)) for i in range(128)])
+        return step
+
+    def eval(self, master_key):
+        r"""
+        Expand ``master_key`` into the list of :math:`R+1` round-key integers.
+
+        INPUT:
+
+            - ``master_key`` -- integer or pair of 64-bit integers; the
+              128-bit master key.
+
+        OUTPUT: list of :math:`R+1` 32-bit integers, round key 0 first.
+        """
+        bits = Cipher.eval(self, int_to_vec(_to_int128(master_key), 128))
+        return [
+            vec_to_int(bits[32 * i : 32 * (i + 1)])
+            for i in range(self.output_length // 32)
+        ]
 
 
 class BEANIE_CVL(CipherImplementation_CVL, AESlike):
@@ -303,10 +322,9 @@ class BEANIE_CVL(CipherImplementation_CVL, AESlike):
             - ``key_schedule`` -- callable or
               :class:`civerly.keyschedule.KeySchedule` (optional); Key
               schedule used to derive round keys from ``key`` via
-              ``set_round_keys``. Pass :func:`beanie_key_schedule` to use the
-              real BEANIE tweak-key schedule (with
-              :func:`functools.partial` to fix a non-zero ``tweak`` or
-              ``rounds`` other than ``5``), or
+              ``set_round_keys``. Pass a :class:`BEANIE_KeySchedule_CVL`
+              instance (with the same ``R`` and the desired ``tweak``) to use
+              the real BEANIE tweak-key schedule, or
               :class:`civerly.keyschedule.DefaultKeySchedule_CVL` to pass
               explicit round keys (32 bits each, :math:`R+1` of them, the
               last one being the final whitening key). In U-shape mode it
@@ -367,16 +385,15 @@ class BEANIE_CVL(CipherImplementation_CVL, AESlike):
         tweak-key schedule::
 
             sage: from civerly.cipher_implementations.beanie \
-            ....:   import BEANIE_CVL, beanie_key_schedule
+            ....:   import BEANIE_CVL, BEANIE_KeySchedule_CVL
             sage: from civerly.util import int_to_vec, vec_to_int
-            sage: from functools import partial
             sage: beanie = BEANIE_CVL(
-            ....:     R=5, key_schedule=partial(beanie_key_schedule, tweak=(0, 0)),
+            ....:     R=5, key_schedule=BEANIE_KeySchedule_CVL(R=5, tweak=(0, 0)),
             ....:     key=(0, 0))
             sage: hex(vec_to_int(beanie(int_to_vec(0x00000000, 32))))
             '0xda46f4d3'
             sage: beanie = BEANIE_CVL(
-            ....:     R=5, key_schedule=beanie_key_schedule, key=0)
+            ....:     R=5, key_schedule=BEANIE_KeySchedule_CVL(), key=0)
             sage: hex(vec_to_int(beanie(int_to_vec(0x00000000, 32))))
             '0xda46f4d3'
 
@@ -546,7 +563,9 @@ class BEANIE_CVL(CipherImplementation_CVL, AESlike):
             if R is None:
                 R = 5
 
-        super().__init__(4, 4, 2, R=R, key_schedule=key_schedule, key=key, name=name)
+        super().__init__(
+            4, 4, 2, R=R, key_schedule=key_schedule, key=key, name=name
+        )
 
         # BEANIE S-box
         sbox = SBox_CVL(SBox(_SBOX), name="SBox")
@@ -650,7 +669,9 @@ class BEANIE_CVL(CipherImplementation_CVL, AESlike):
                 rk_components.append(self.nodes[node].nodes[node_rk])
 
             # Last round (without MixColumns) and final key addition
-            node = self.add_subcipher(beanie_last, [(node, (i, i)) for i in range(8)])
+            node = self.add_subcipher(
+                beanie_last, [(node, (i, i)) for i in range(8)]
+            )
             rk_components.append(self.nodes[node].nodes[node_rk_last])
             node = self.add_subcipher(key_add, [(node, (i, i)) for i in range(8)])
             rk_components.append(self.nodes[node])
@@ -683,7 +704,9 @@ class BEANIE_CVL(CipherImplementation_CVL, AESlike):
             node_rk_inv_second = beanie_inv_last.add_subcipher(
                 key_add, [(node_s_inv, (i, i)) for i in range(8)]
             )
-            beanie_inv_last.add_output([(node_rk_inv_second, (i, i)) for i in range(8)])
+            beanie_inv_last.add_output(
+                [(node_rk_inv_second, (i, i)) for i in range(8)]
+            )
 
             # Inverse round block: MixColumns -> ShiftRows -> SBox_inv -> KeyAdd
             beanie_inv_round = AESlike(4, 4, 2, name="BEANIE-inv-round")
@@ -704,7 +727,9 @@ class BEANIE_CVL(CipherImplementation_CVL, AESlike):
             node_rk_inv_round = beanie_inv_round.add_subcipher(
                 key_add, [(node_s_inv, (i, i)) for i in range(8)]
             )
-            beanie_inv_round.add_output([(node_rk_inv_round, (i, i)) for i in range(8)])
+            beanie_inv_round.add_output(
+                [(node_rk_inv_round, (i, i)) for i in range(8)]
+            )
 
             # Assemble the U-shape cipher. Round keys: rl+1 of the left branch,
             # followed by rr+1 of the right branch.
@@ -742,7 +767,9 @@ class BEANIE_CVL(CipherImplementation_CVL, AESlike):
             self.add_output([(node, (i, i)) for i in range(8)])
 
             # A branch with zero rounds has no round key components.
-            self._rk_components = [rk for rk in rks_left + rks_right if rk is not None]
+            self._rk_components = [
+                rk for rk in rks_left + rks_right if rk is not None
+            ]
 
         if key_schedule is not None and key is not None:
             self.set_round_keys(key)

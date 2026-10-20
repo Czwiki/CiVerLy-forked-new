@@ -1,13 +1,16 @@
 from sage.crypto.sbox import SBox
 
 from civerly.cipher_implementations.base import CipherImplementation_CVL
+from civerly.cipher import Cipher
 from civerly.component import (
     XOR_CVL,
+    ConstXOR_CVL,
     PermuteLayer_CVL,
     RotateLayer_CVL,
     RoundkeyXOR_CVL,
     SBox_CVL,
 )
+from civerly.keyschedule import KeySchedule
 from civerly.sboxcipher import SBoxCipher
 
 # S-boxes used in LBlock (s0 through s9)
@@ -50,47 +53,121 @@ def _build_sbox_layer():
         sboxlayer.add_output([(node, (j, src_start + j)) for j in range(4)])
     return sboxlayer
 
-
-def lblock_key_schedule(key, rounds=32):
+def _make_ks_step(i):
     r"""
-    Generate the 32-bit round keys for LBlock from an 80-bit master key.
+    One LBlock key-schedule update as an ``SBoxCipher(80, 80)``.
 
-    INPUT:
+    In the 80-bit vector, bit 0 is the MSB, i.e. ``k79`` sits at index 0 and
+    ``k_j`` at index ``79 - j``. The step computes
 
-        - ``key`` -- integer; the 80-bit master key.
-
-        - ``rounds`` -- integer (default: ``32``); number of rounds.
-
-    OUTPUT: A list of ``rounds`` 32-bit round-key integers.
-
-    EXAMPLES::
-
-        sage: from civerly.cipher_implementations.lblock import lblock_key_schedule
-        sage: rks = lblock_key_schedule(0x0)
-        sage: [hex(k) for k in rks[:4]]
-        ['0x0', '0xb8000000', '0xbb000000', '0x580002e0']
+    (a) ``K = K <<< 29``,
+    (b) ``[k79k78k77k76] = s9([k79k78k77k76])`` and
+        ``[k75k74k73k72] = s8([k75k74k73k72])``,
+    (c) ``[k50k49k48k47k46] ^= [i+1]_2``.
     """
-    K = key & ((1 << 80) - 1)
-    rks = []
-    for i in range(rounds):
-        # output leftmost 32 bits as round key
-        rks.append((K >> 48) & 0xFFFFFFFF)
-        # (a) rotate left by 29
-        K = ((K << 29) & ((1 << 80) - 1)) | (K >> (80 - 29))
-        # (b) s9 on the top nibble, s8 on the next nibble
-        nibble9 = (K >> 76) & 0xF
-        nibble8 = (K >> 72) & 0xF
-        K = (
-            (K & ~((0xF << 76) | (0xF << 72)))
-            | (_SBOX_TABLES[9][nibble9] << 76)
-            | (_SBOX_TABLES[8][nibble8] << 72)
-        )
-        # (c) XOR counter [i+1]_2 into bits k50..k46
-        counter = (i + 1) & 0x1F
-        k_bits = (K >> 46) & 0x1F
-        k_bits ^= counter
-        K = (K & ~(0x1F << 46)) | (k_bits << 46)
-    return rks
+    step = SBoxCipher(80, 80, name=f"KS-step-{i}")
+    node_rot = step.add_subcipher(
+        RotateLayer_CVL(80, 29, word_coarseness=1, name="rot29"),
+        [(step.IN, (j, j)) for j in range(80)],
+    )
+    node_s9 = step.add_subcipher(
+        SBox_CVL(_SBOXES[9], name="ks_s9"), [(node_rot, (j, j)) for j in range(4)]
+    )
+    node_s8 = step.add_subcipher(
+        SBox_CVL(_SBOXES[8], name="ks_s8"),
+        [(node_rot, (4 + j, j)) for j in range(4)],
+    )
+    # k50..k46 are vector bits 29..33 (k50 = MSB of the counter)
+    node_c = step.add_subcipher(
+        ConstXOR_CVL(5, (i + 1) & 0x1F, name=f"ks_counter_{i + 1}"),
+        [(node_rot, (29 + j, j)) for j in range(5)],
+    )
+    step.add_output(
+        [(node_s9, (j, j)) for j in range(4)]
+        + [(node_s8, (j, 4 + j)) for j in range(4)]
+        + [(node_rot, (j, j)) for j in range(8, 29)]
+        + [(node_c, (j, 29 + j)) for j in range(5)]
+        + [(node_rot, (j, j)) for j in range(34, 80)]
+    )
+    return step
+
+
+class LBLOCK_KeySchedule_CVL(KeySchedule):
+    def __init__(self, R=32, name="LBlock-KeySchedule"):
+        r"""
+        LBlock key schedule [Wu11] as a CiVerLy DAG.
+
+        Takes an 80-bit master key ``K = k79 k78 ... k0`` and expands it into
+        ``R`` round keys of 32 bits each. Round key ``K_0`` is the leftmost 32
+        bits of ``K``; for ``i = 1, ..., R - 1`` the key register is updated by
+
+        (a) ``K = K <<< 29``,
+        (b) ``[k79k78k77k76] = s9([k79k78k77k76])`` and
+            ``[k75k74k73k72] = s8([k75k74k73k72])``,
+        (c) ``[k50k49k48k47k46] = [k50k49k48k47k46] ^ [i]_2``,
+
+        and ``K_i`` is the leftmost 32 bits of the updated register.
+
+        INPUT:
+
+            - ``R`` -- integer (default: ``32``); number of rounds, i.e. the
+              number of round keys (same meaning as in :class:`LBLOCK_CVL`).
+
+            - ``name`` -- string (default: ``"LBlock-KeySchedule"``); name.
+
+        EXAMPLES::
+
+            sage: from civerly.cipher_implementations.lblock import (
+            ....:   LBLOCK_KeySchedule_CVL)
+            sage: ks = LBLOCK_KeySchedule_CVL()
+            sage: rks = ks(0x0)
+            sage: len(rks)
+            32
+            sage: [hex(k) for k in rks[:4]]
+            ['0x0', '0xb8000000', '0xbb000000', '0x580002e0']
+            sage: ks.input_length, ks.output_length
+            (80, 1024)
+
+        TESTS:
+
+        The round keys for ``R`` rounds are a prefix of those for 32 rounds::
+
+            sage: from civerly.cipher_implementations.lblock import (
+            ....:   LBLOCK_KeySchedule_CVL)
+            sage: k = 0x0123456789abcdeffedc
+            sage: LBLOCK_KeySchedule_CVL(R=5)(k) == LBLOCK_KeySchedule_CVL()(k)[:5]
+            True
+            sage: LBLOCK_KeySchedule_CVL(R=1)(k) == [0x01234567]
+            True
+        """
+        super().__init__(80, 32 * R, name=name)
+
+        output_edges = [(self.IN, (j, j)) for j in range(32)]
+        node = self.IN
+        for i in range(R - 1):
+            node = self.add_subcipher(
+                _make_ks_step(i), [(node, (j, j)) for j in range(80)]
+            )
+            output_edges += [(node, (j, 32 * (i + 1) + j)) for j in range(32)]
+        self.add_output(output_edges)
+
+    def eval(self, k):
+        r"""
+        Expand master key ``k`` into a list of ``R`` 32-bit round-key integers.
+
+        INPUT:
+
+            - ``k`` -- integer; 80-bit master key.
+
+        OUTPUT: List of ``R`` integers, round key 0 first.
+        """
+        from civerly.util import int_to_vec, vec_to_int
+
+        bits = Cipher.eval(self, int_to_vec(k, self.input_length))
+        return [
+            vec_to_int(bits[32 * i : 32 * (i + 1)])
+            for i in range(self.output_length // 32)
+        ]
 
 
 class LBLOCK_CVL(CipherImplementation_CVL, SBoxCipher):
@@ -117,8 +194,8 @@ class LBLOCK_CVL(CipherImplementation_CVL, SBoxCipher):
             - ``key_schedule`` -- callable or
               :class:`civerly.keyschedule.KeySchedule` (optional); Key
               schedule used to derive round keys from ``key`` via
-              ``set_round_keys``. Pass :func:`lblock_key_schedule` to use the
-              real LBlock key schedule, or
+              ``set_round_keys``. Pass :class:`LBLOCK_KeySchedule_CVL` to use
+              the real LBlock key schedule, or
               :class:`civerly.keyschedule.DefaultKeySchedule_CVL` to pass
               explicit round keys (``R`` of them, 32 bits each). Defaults to
               ``None`` (no key schedule, all-zero round keys).
@@ -140,9 +217,10 @@ class LBLOCK_CVL(CipherImplementation_CVL, SBoxCipher):
         Test vectors from the LBlock specification (https://eprint.iacr.org/2011/345, App. I)::
 
             sage: from civerly.cipher_implementations.lblock \
-            ....:   import LBLOCK_CVL, lblock_key_schedule
+            ....:   import LBLOCK_CVL, LBLOCK_KeySchedule_CVL
             sage: from civerly.util import int_to_vec, vec_to_int
-            sage: cipher = LBLOCK_CVL(R=32, key_schedule=lblock_key_schedule, key=0x0)
+            sage: cipher = LBLOCK_CVL(
+            ....:   R=32, key_schedule=LBLOCK_KeySchedule_CVL(R=32), key=0x0)
             sage: hex(vec_to_int(cipher(int_to_vec(0x0, 64))))
             '0xc218185308e75bcd'
             sage: cipher.set_round_keys(0x0123456789abcdeffedc)
@@ -153,7 +231,7 @@ class LBLOCK_CVL(CipherImplementation_CVL, SBoxCipher):
         :class:`civerly.keyschedule.DefaultKeySchedule_CVL`::
 
             sage: from civerly.keyschedule import DefaultKeySchedule_CVL
-            sage: rks = lblock_key_schedule(0x0123456789abcdeffedc)
+            sage: rks = LBLOCK_KeySchedule_CVL(R=32)(0x0123456789abcdeffedc)
             sage: cipher = LBLOCK_CVL(
             ....:   R=32, key_schedule=DefaultKeySchedule_CVL(32, 32), key=rks)
             sage: hex(vec_to_int(cipher(int_to_vec(0x0123456789abcdef, 64))))
@@ -249,7 +327,9 @@ class LBLOCK_CVL(CipherImplementation_CVL, SBoxCipher):
         node = self.add_subcipher(final_swap, [(node, (i, i)) for i in range(64)])
         self.add_output([(node, (i, i)) for i in range(64)])
 
-        self._rk_components = [self.nodes[r + 1].nodes[node_rk] for r in range(self.R)]
+        self._rk_components = [
+            self.nodes[r + 1].nodes[node_rk] for r in range(self.R)
+        ]
 
         if key_schedule is not None and key is not None:
             self.set_round_keys(key)

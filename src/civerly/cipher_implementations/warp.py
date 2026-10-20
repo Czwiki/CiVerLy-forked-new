@@ -2,39 +2,82 @@ from sage.crypto.sbox import SBox
 
 from civerly.cipher_implementations.base import CipherImplementation_CVL
 from civerly.component import XOR_CVL, PermuteLayer_CVL, RoundkeyXOR_CVL, SBox_CVL
+from civerly.keyschedule import KeySchedule
 from civerly.wordsboxcipher import WordSBoxCipher
 
 
-def warp_key_schedule(master_key, rounds=41):
-    r"""
-    Generate the 64-bit round keys for WARP from a 128-bit master key.
+class WARP_KeySchedule_CVL(KeySchedule):
+    def __init__(self, R=41):
+        r"""
+        WARP key schedule as a CiVerLy DAG.
 
-    The master key is split into two halves ``K0`` (upper 64 bits) and
-    ``K1`` (lower 64 bits), which are used alternately as round keys,
-    starting with ``K0``.
+        The 128-bit master key is split into two halves ``K0`` (upper 64 bits)
+        and ``K1`` (lower 64 bits), which are used alternately as round keys,
+        starting with ``K0``. No computation is needed: each 64-bit round key
+        is wired directly from the corresponding half of the input.
 
-    INPUT:
+        INPUT:
 
-        - ``master_key`` -- integer; the 128-bit master key.
+            - ``R`` -- integer (default: ``41``); Number of rounds, with the
+              same meaning as in :class:`WARP_CVL`. One 64-bit round key is
+              produced per round, for at most 41 rounds.
 
-        - ``rounds`` -- integer (default: ``41``); number of rounds.
+        EXAMPLES::
 
-    OUTPUT: A list of ``rounds`` 64-bit round-key integers.
+            sage: from civerly.cipher_implementations.warp import (
+            ....:   WARP_KeySchedule_CVL)
+            sage: ks = WARP_KeySchedule_CVL()
+            sage: rks = ks(0x0123456789abcdeffedcba9876543210)
+            sage: len(rks)
+            41
+            sage: [hex(k) for k in rks[:2]]
+            ['0x123456789abcdef', '0xfedcba9876543210']
+            sage: rks[40] == rks[0]
+            True
+            sage: ks.input_length, ks.output_length
+            (128, 2624)
 
-    EXAMPLES::
+        TESTS:
 
-        sage: from civerly.cipher_implementations.warp import warp_key_schedule
-        sage: rks = warp_key_schedule(0x0123456789abcdeffedcba9876543210)
-        sage: len(rks)
-        41
-        sage: [hex(k) for k in rks[:2]]
-        ['0x123456789abcdef', '0xfedcba9876543210']
-        sage: rks[40] == rks[0]
-        True
-    """
-    k0 = (master_key >> 64) & ((1 << 64) - 1)
-    k1 = master_key & ((1 << 64) - 1)
-    return [k0 if r % 2 == 0 else k1 for r in range(rounds)]
+        The number of round keys matches the round-key components of
+        :class:`WARP_CVL`::
+
+            sage: from civerly.cipher_implementations.warp import WARP_CVL
+            sage: all(
+            ....:   len(WARP_KeySchedule_CVL(R=r)(0))
+            ....:   == len(WARP_CVL(R=r)._rk_components)
+            ....:   for r in [1, 2, 5, 40, 41])
+            True
+        """
+        n_rk = min(R, 41)
+        super().__init__(128, 64 * n_rk, name="WARP-KeySchedule")
+        self.R = R
+        self.add_output(
+            [
+                (self.IN, (64 * (r % 2) + i, 64 * r + i))
+                for r in range(n_rk)
+                for i in range(64)
+            ]
+        )
+
+    def eval(self, master_key):
+        r"""
+        Expand ``master_key`` into the list of 64-bit round keys.
+
+        INPUT:
+
+            - ``master_key`` -- integer; the 128-bit master key.
+
+        OUTPUT: List of ``min(R, 41)`` 64-bit round-key integers.
+        """
+        from civerly.cipher import Cipher
+        from civerly.util import int_to_vec, vec_to_int
+
+        bits = Cipher.eval(self, int_to_vec(master_key, self.input_length))
+        return [
+            vec_to_int(bits[64 * i : 64 * (i + 1)])
+            for i in range(self.output_length // 64)
+        ]
 
 
 class WARP_CVL(CipherImplementation_CVL, WordSBoxCipher):
@@ -52,8 +95,8 @@ class WARP_CVL(CipherImplementation_CVL, WordSBoxCipher):
             - ``key_schedule`` -- callable or
               :class:`civerly.keyschedule.KeySchedule` (optional); Key
               schedule used to derive round keys from ``key`` via
-              ``set_round_keys``. Pass :func:`warp_key_schedule` to use the
-              real WARP key schedule, or
+              ``set_round_keys``. Pass :class:`WARP_KeySchedule_CVL` (with the
+              same ``R``) to use the real WARP key schedule, or
               :class:`civerly.keyschedule.DefaultKeySchedule_CVL` to pass
               explicit round keys (one per round, 64 bits each). Defaults to
               ``None`` (no key schedule, all-zero round keys).
@@ -76,13 +119,13 @@ class WARP_CVL(CipherImplementation_CVL, WordSBoxCipher):
         Encrypt using the test vectors from the specification::
 
             sage: from civerly.cipher_implementations.warp \
-            ....:   import WARP_CVL, warp_key_schedule
+            ....:   import WARP_CVL, WARP_KeySchedule_CVL
             sage: from civerly.util import int_to_vec, vec_to_int
             sage: # Test vector 1
             sage: key = 0x0123456789abcdeffedcba9876543210
             sage: pt  = 0x0123456789abcdeffedcba9876543210
             sage: ct  = 0x24ce0a8efd9f32de529d5fdf45703a8d
-            sage: warp = WARP_CVL(key_schedule=warp_key_schedule, key=key)
+            sage: warp = WARP_CVL(key_schedule=WARP_KeySchedule_CVL(), key=key)
             sage: vec_to_int(warp(int_to_vec(pt, 128))) == ct
             True
             sage: # Test vector 2
@@ -94,7 +137,7 @@ class WARP_CVL(CipherImplementation_CVL, WordSBoxCipher):
             sage: key3 = 0x0acd022f680a547fee03c0867b09e3d7
             sage: pt3  = 0xaf6cdd90fc5a6eaa897bcd1208d391e1
             sage: ct3  = 0x6123995f1924d31425641acdd058dd46
-            sage: warp3 = WARP_CVL(key_schedule=warp_key_schedule, key=key3)
+            sage: warp3 = WARP_CVL(key_schedule=WARP_KeySchedule_CVL(), key=key3)
             sage: vec_to_int(warp3(int_to_vec(pt3, 128))) == ct3
             True
             sage: warp3.set_round_keys(key)
@@ -105,7 +148,7 @@ class WARP_CVL(CipherImplementation_CVL, WordSBoxCipher):
         :class:`civerly.keyschedule.DefaultKeySchedule_CVL`::
 
             sage: from civerly.keyschedule import DefaultKeySchedule_CVL
-            sage: rks = warp_key_schedule(key3)
+            sage: rks = WARP_KeySchedule_CVL()(key3)
             sage: warp = WARP_CVL(
             ....:   key_schedule=DefaultKeySchedule_CVL(64, 41), key=rks)
             sage: vec_to_int(warp(int_to_vec(pt3, 128))) == ct3

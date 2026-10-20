@@ -14,19 +14,20 @@ from sage.matrix.constructor import Matrix as matrix
 from sage.rings.finite_rings.finite_field_constructor import GF
 
 from civerly.cipher_implementations.base import CipherImplementation_CVL
-from civerly.component import LinearLayer_CVL, RoundkeyXOR_CVL, SBox_CVL
+from civerly.component import (
+    XOR_CVL,
+    ConstXOR_CVL,
+    LinearLayer_CVL,
+    RotateLayer_CVL,
+    RoundkeyXOR_CVL,
+    SBox_CVL,
+)
+from civerly.keyschedule import KeySchedule
 from civerly.sboxcipher import SBoxCipher
 from civerly.util import int_to_vec
 
 _MASK16 = (1 << 16) - 1
 _MASK32 = (1 << 32) - 1
-
-
-def _rol32(value, shift):
-    """Rotate a 32-bit word left by ``shift`` bits."""
-    shift %= 32
-    value &= _MASK32
-    return ((value << shift) | (value >> (32 - shift))) & _MASK32
 
 
 def _rol16(value, shift):
@@ -74,117 +75,230 @@ def _aradi_linear_word_matrix(a, b, c):
     return matrix(GF(2), rows).transpose()
 
 
-def _m0(x, y):
-    s = _rol32(x, 1)
-    return (s ^ y, _rol32(y, 3) ^ s ^ y)
-
-
-def _m1(x, y):
-    s = _rol32(x, 9)
-    return (s ^ y, _rol32(y, 28) ^ s ^ y)
-
-
-def _permute(state, j):
-    state = list(state)
-    if j % 2 == 0:
-        state[1], state[2] = state[2], state[1]
-        state[5], state[6] = state[6], state[5]
-    else:
-        state[1], state[4] = state[4], state[1]
-        state[3], state[6] = state[6], state[3]
-    return state
-
-
-def _keyschedule_step(input_state, i):
-    # Mix the four word pairs with M0/M1.
-    t0, t1 = _m0(input_state[0], input_state[1])
-    t2, t3 = _m1(input_state[2], input_state[3])
-    t4, t5 = _m0(input_state[4], input_state[5])
-    t6, t7 = _m1(input_state[6], input_state[7])
-    mixed = [t0, t1, t2, t3, t4, t5, t6, t7]
-
-    # Apply P_i and XOR the round counter into the last word.
-    perm = _permute(mixed, i)
-    perm[7] = (perm[7] ^ i) & _MASK32
-    return perm
-
-
-def aradi_key_schedule(master_key):
+def _make_mix(a, b, name):
     r"""
-    Expand a 256-bit ARADI master key into 128-bit round keys.
+    Word-pair mixing map ``M_{a,b}`` as a ``SBoxCipher(64, 64)``.
 
-    INPUT:
+    Input ``x || y`` (two 32-bit words), output ``u || v`` with::
 
-        - ``master_key`` -- list or tuple of 8 integers, or integer; The
-          master key, either as eight 32-bit words or as a 256-bit integer
-          whose most significant 32 bits are the first word.
+        u = (x <<< a) ^ y
+        v = (y <<< b) ^ u
 
-    OUTPUT: A list of 17 integers (round keys ``0, ..., 15`` followed by
-    the post-whitening key),
-    each encoding one 128-bit round key as ``w || x || y || z`` in
-    big-endian layout.
-
-    EXAMPLES::
-
-        sage: from civerly.cipher_implementations.aradi import aradi_key_schedule
-        sage: key = [
-        ....:   0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C,
-        ....:   0x13121110, 0x17161514, 0x1B1A1918, 0x1F1E1D1C,
-        ....: ]
-        sage: rks = aradi_key_schedule(key)
-        sage: len(rks), hex(rks[0]), hex(rks[16])
-        (17, '0x3020100070605040b0a09080f0e0d0c', '0xa443053b69322a8ee8abfb4f41cf0ca8')
-        sage: aradi_key_schedule(
-        ....:   0x03020100070605040B0A09080F0E0D0C13121110171615141B1A19181F1E1D1C
-        ....: ) == rks
-        True
+    ``M0 = M_{1,3}`` and ``M1 = M_{9,28}``.
     """
-    if not hasattr(master_key, "__iter__"):
+    mix = SBoxCipher(64, 64, name=name)
+    node_rx = mix.add_subcipher(
+        RotateLayer_CVL(32, a, name=f"ROL{a}"),
+        [(mix.IN, (i, i)) for i in range(32)],
+    )
+    node_ry = mix.add_subcipher(
+        RotateLayer_CVL(32, b, name=f"ROL{b}"),
+        [(mix.IN, (32 + i, i)) for i in range(32)],
+    )
+    node_u = mix.add_subcipher(
+        XOR_CVL(32, name="XOR_u"),
+        [(node_rx, (i, i)) for i in range(32)]
+        + [(mix.IN, (32 + i, 32 + i)) for i in range(32)],
+    )
+    node_v = mix.add_subcipher(
+        XOR_CVL(32, name="XOR_v"),
+        [(node_ry, (i, i)) for i in range(32)]
+        + [(node_u, (i, 32 + i)) for i in range(32)],
+    )
+    mix.add_output(
+        [(node_u, (i, i)) for i in range(32)]
+        + [(node_v, (i, 32 + i)) for i in range(32)]
+    )
+    return mix
+
+
+class ARADI_KeySchedule_CVL(KeySchedule):
+    def __init__(self, R=16, name="ARADI-KeySchedule"):
+        r"""
+        ARADI key schedule as a CiVerLy DAG.
+
+        Takes the 256-bit master key (eight 32-bit words ``K_0 || ... || K_7``,
+        word 0 in the most significant bits) and expands it into the ``R + 1``
+        128-bit round keys of :class:`ARADI_CVL` with ``R`` rounds, in
+        ``_rk_components`` order (round keys ``0, ..., R - 1`` followed by the
+        post-whitening key).
+
+        The 256-bit key register is updated by ``R`` steps; step ``j``
+        applies ``M0`` to word pairs ``(0, 1)`` and ``(4, 5)``, ``M1`` to
+        pairs ``(2, 3)`` and ``(6, 7)``, the word permutation ``P_{j mod 2}``
+        and XORs ``j`` into word 7. Key ``k`` is taken from the register after
+        ``k`` steps: its first four words for even ``k``, its last four words
+        for odd ``k``. For ``R = 16`` the last key is the post-whitening key of
+        the specification; for reduced ``R`` the last key is the ``R``-th
+        key of the full schedule.
+
+        INPUT:
+
+            - ``R`` -- integer (default: ``16``); Number of rounds of the
+              ARADI instance, same meaning as in :class:`ARADI_CVL`.
+
+            - ``name`` -- string (default: ``"ARADI-KeySchedule"``); The name
+              of the key schedule.
+
+        EXAMPLES::
+
+            sage: from civerly.cipher_implementations.aradi import (
+            ....:   ARADI_KeySchedule_CVL)
+            sage: ks = ARADI_KeySchedule_CVL()
+            sage: key = [
+            ....:   0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C,
+            ....:   0x13121110, 0x17161514, 0x1B1A1918, 0x1F1E1D1C,
+            ....: ]
+            sage: rks = ks(key)
+            sage: len(rks)
+            17
+            sage: hex(rks[0]), hex(rks[16])
+            ('0x3020100070605040b0a09080f0e0d0c', '0xa443053b69322a8ee8abfb4f41cf0ca8')
+            sage: ks(
+            ....:   0x03020100070605040B0A09080F0E0D0C13121110171615141B1A19181F1E1D1C
+            ....: ) == rks
+            True
+            sage: ARADI_KeySchedule_CVL(R=2)(key) == rks[:3]
+            True
+
+        TESTS:
+
+        The full key schedule against the reference test vector::
+
+            sage: from civerly.cipher_implementations.aradi import (
+            ....:   ARADI_KeySchedule_CVL)
+            sage: ks = ARADI_KeySchedule_CVL(16)
+            sage: (ks.input_length, ks.output_length)
+            (256, 2176)
+            sage: k = 0x03020100070605040B0A09080F0E0D0C13121110171615141B1A19181F1E1D1C
+            sage: for rk in ks(k):
+            ....:     print(f'{rk:032x}')
+            03020100070605040b0a09080f0e0d0c
+            313237342b2c2d2a89829f94eaddccfb
+            1918131249484342bfb2b5b8efe2e5e8
+            93d8dd9649bbf10212918d0e2caf0292
+            7c795e5b6e0a4a2f708952ab0fb51eb7
+            73be37f3b12de15c6d10261a63fa1fb1
+            30e1a56556518eba38a4dc7043b62b6b
+            6ff94bf4a1525d49960d690af40ac5e6
+            652b43fa7ea0caa18356eca6eed8d0ca
+            1e8816b8eaf40402bf1911dbd2ed83c3
+            2aed0767d7e429720ddcac43e0ce34bd
+            e587db6fd93a728ee7a7904354e47c4c
+            5deafddf1235c451b94205971bc4fb83
+            f95881fca9cbae8e266a00c264230546
+            cc0fab2e5b7aad7732495539b022810a
+            71c5c0468ab9aa02d8fb0856b7dfa119
+            a443053b69322a8ee8abfb4f41cf0ca8
+            sage: ks([0] * 7)
+            Traceback (most recent call last):
+            ...
+            ValueError: ARADI master key must contain 8 words, got 7
+            sage: ks(1 << 256)
+            Traceback (most recent call last):
+            ...
+            ValueError: ARADI master key does not fit into 256 bits: ...
+        """
+        super().__init__(256, 128 * (R + 1), name=name)
+        self.R = R
+
+        m0 = _make_mix(1, 3, name="M0")
+        m1 = _make_mix(9, 28, name="M1")
+
+        # Round key 0 is the first half of the master key.
+        output_edges = [(self.IN, (i, i)) for i in range(128)]
+        node = self.IN
+        for j in range(R):
+            node = self.add_subcipher(
+                self._make_step(j, m0, m1),
+                [(node, (i, i)) for i in range(256)],
+            )
+            # Key j + 1: last four words for odd j + 1, first four otherwise.
+            offset = 128 if (j + 1) % 2 == 1 else 0
+            output_edges += [
+                (node, (offset + i, 128 * (j + 1) + i)) for i in range(128)
+            ]
+        self.add_output(output_edges)
+
+    @staticmethod
+    def _make_step(j, m0, m1):
+        r"""
+        One key-register update step ``j`` as a ``SBoxCipher(256, 256)``:
+        mix the word pairs with ``M0``/``M1``, permute the words with
+        ``P_{j mod 2}`` and XOR the counter ``j`` into word 7.
+        """
+        step = SBoxCipher(256, 256, name=f"KS-step-{j}")
+        mixes = [
+            step.add_subcipher(
+                mix, [(step.IN, (64 * p + i, i)) for i in range(64)]
+            )
+            for p, mix in enumerate([m0, m1, m0, m1])
+        ]
+        # Source of each mixed word t_0, ..., t_7 as (node, bit offset).
+        words = [(mixes[w // 2], 32 * (w % 2)) for w in range(8)]
+
+        # P_j: output word k takes mixed word perm[k].
+        if j % 2 == 0:
+            perm = [0, 2, 1, 3, 4, 6, 5, 7]
+        else:
+            perm = [0, 4, 2, 6, 1, 5, 3, 7]
+
+        # Word 7 is fixed by both permutations; add the counter to it.
+        node_c, off_c = words[perm[7]]
+        node_ctr = step.add_subcipher(
+            ConstXOR_CVL(32, j, name=f"XOR_ctr{j}"),
+            [(node_c, (off_c + i, i)) for i in range(32)],
+        )
+        words_out = [words[perm[k]] for k in range(7)] + [(node_ctr, 0)]
+        step.add_output(
+            [
+                (src, (off + i, 32 * k + i))
+                for k, (src, off) in enumerate(words_out)
+                for i in range(32)
+            ]
+        )
+        return step
+
+    def eval(self, master_key):
+        r"""
+        Expand ``master_key`` into a list of ``R + 1`` round-key integers.
+
+        INPUT:
+
+            - ``master_key`` -- integer or list of 8 integers; the 256-bit
+              master key, either as a 256-bit integer whose most significant
+              32 bits are word 0, or as eight 32-bit words.
+
+        OUTPUT: list of ``R + 1`` integers, each a 128-bit round key
+        ``w || x || y || z`` (round keys ``0, ..., R - 1``, then the
+        post-whitening key).
+        """
+        from civerly.cipher import Cipher
+        from civerly.util import vec_to_int
+
+        if hasattr(master_key, "__iter__"):
+            words = list(master_key)
+            if len(words) != 8:
+                raise ValueError(
+                    f"ARADI master key must contain 8 words, got {len(words)}"
+                )
+            master_key = 0
+            for i, word in enumerate(words):
+                if not 0 <= word <= _MASK32:
+                    raise ValueError(
+                        f"Master key word {i} is out of 32-bit range: {word}"
+                    )
+                master_key = (master_key << 32) | int(word)
         if not 0 <= master_key < (1 << 256):
             raise ValueError(
                 f"ARADI master key does not fit into 256 bits: {master_key}"
             )
-        master_key = [(master_key >> (32 * (7 - i))) & _MASK32 for i in range(8)]
-    master_key = list(master_key)
-    if len(master_key) != 8:
-        raise ValueError(
-            f"ARADI master key must contain 8 words, got {len(master_key)}"
-        )
 
-    # Validate range and convert to a mutable list of 32-bit words.
-    key_state = []
-    for i, word in enumerate(master_key):
-        if not (0 <= word <= _MASK32):
-            raise ValueError(f"Master key word {i} is out of 32-bit range: {word}")
-        key_state.append(int(word) & _MASK32)
-
-    # Generate the successive 8-word register states.
-    states = [key_state]
-    for i in range(1, 16, 2):
-        ki = _keyschedule_step(states[-1], i - 1)
-        ki2 = _keyschedule_step(ki, i)
-        states.append(ki)
-        states.append(ki2)
-
-    # Extract round keys.  Even-indexed rounds use the first four words,
-    # odd-indexed rounds the last four; the post-whitening key is the
-    # first four words of the final register state.
-    round_key_word_lists = [states[0][:4]]
-    for i in range(1, 16, 2):
-        round_key_word_lists.append(states[i][4:])
-        round_key_word_lists.append(states[i + 1][:4])
-
-    round_keys = []
-    for words in round_key_word_lists:
-        rk = (
-            (words[0] & _MASK32) << 96
-            | (words[1] & _MASK32) << 64
-            | (words[2] & _MASK32) << 32
-            | (words[3] & _MASK32)
-        )
-        round_keys.append(rk)
-
-    return round_keys
+        bits = Cipher.eval(self, int_to_vec(master_key, 256))
+        return [
+            vec_to_int(bits[128 * k : 128 * (k + 1)])
+            for k in range(self.output_length // 128)
+        ]
 
 
 class ARADI_CVL(CipherImplementation_CVL, SBoxCipher):
@@ -212,9 +326,10 @@ class ARADI_CVL(CipherImplementation_CVL, SBoxCipher):
             - ``key_schedule`` -- callable or
               :class:`civerly.keyschedule.KeySchedule` (optional); Key
               schedule used to derive round keys from ``key`` via
-              ``set_round_keys``. Pass :func:`aradi_key_schedule` to use the
-              real ARADI key schedule (for reduced ``R`` the leading round
-              keys are used), or
+              ``set_round_keys``. Pass an :class:`ARADI_KeySchedule_CVL`
+              instance with the same ``R`` to use the real ARADI key schedule
+              (for reduced ``R`` it yields the leading ``R + 1`` keys of the
+              full schedule), or
               :class:`civerly.keyschedule.DefaultKeySchedule_CVL` to pass
               explicit 128-bit round keys: ``R + 1`` of them, one per round
               plus the post-whitening key. Defaults to ``None`` (no key
@@ -281,29 +396,30 @@ class ARADI_CVL(CipherImplementation_CVL, SBoxCipher):
         schedule::
 
             sage: from civerly.cipher_implementations.aradi \
-            ....:   import aradi_key_schedule
+            ....:   import ARADI_KeySchedule_CVL
             sage: key = [
             ....:   0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C,
             ....:   0x13121110, 0x17161514, 0x1B1A1918, 0x1F1E1D1C,
             ....: ]
-            sage: aradi_from_key = ARADI_CVL(key_schedule=aradi_key_schedule, key=key)
+            sage: aradi_from_key = ARADI_CVL(
+            ....:   key_schedule=ARADI_KeySchedule_CVL(), key=key)
             sage: hex(vec_to_int(aradi_from_key(int_to_vec(0x0, 128))))
             '0x3f09abf400e3bd7403260defb7c53912'
             sage: aradi_from_key.set_round_keys([0] * 8)
             sage: aradi_from_key(int_to_vec(0x0, 128)) == \
-            ....:   ARADI_CVL(key_schedule=aradi_key_schedule, key=0)(
+            ....:   ARADI_CVL(key_schedule=ARADI_KeySchedule_CVL(), key=0)(
             ....:     int_to_vec(0x0, 128))
             True
 
-        A reduced-round instance uses the leading round keys of the key
-        schedule::
+        A reduced-round instance uses the leading round keys of the full key
+        schedule (the last of them acting as post-whitening key)::
 
             sage: aradi_red = ARADI_CVL(
-            ....:   R=2, key_schedule=aradi_key_schedule, key=key)
+            ....:   R=2, key_schedule=ARADI_KeySchedule_CVL(R=2), key=key)
             sage: len(aradi_red._rk_components)
             3
             sage: [c.const for c in aradi_red._rk_components] == \
-            ....:   aradi_key_schedule(key)[:3]
+            ....:   ARADI_KeySchedule_CVL()(key)[:3]
             True
 
         Analyse ARADI with MILP (matching https://eprint.iacr.org/2024/1324.pdf)::

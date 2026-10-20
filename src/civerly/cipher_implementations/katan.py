@@ -9,10 +9,15 @@ original sources for licensing and full attribution.
 """
 
 from sage.crypto.sbox import SBox
+from sage.matrix.constructor import Matrix as matrix
+from sage.rings.finite_rings.finite_field_constructor import GF
 
+from civerly.cipher import Cipher
 from civerly.cipher_implementations.base import CipherImplementation_CVL
-from civerly.component import RoundkeyXOR_CVL, SBox_CVL
+from civerly.component import LinearLayer_CVL, RoundkeyXOR_CVL, SBox_CVL
+from civerly.keyschedule import KeySchedule
 from civerly.sboxcipher import SBoxCipher
+from civerly.util import int_to_vec
 
 PARAMS = {
     32: {
@@ -109,48 +114,119 @@ def _fb_sbox():
     return SBox(table)
 
 
-def katan_key_schedule(master_key, variant=32):
+class KATAN_KeySchedule_CVL(KeySchedule):
     r"""
-    Generate the KATAN round keys from an 80-bit master key, in the order of
-    the round-key components of :class:`KATAN_CVL`.
+    The KATAN key schedule as a CiVerLy DAG, producing the round keys in the
+    order of the round-key components of :class:`KATAN_CVL`.
 
-    In every step of round ``r`` (0-based), KATAN XORs the key bit
-    ``k_{2r}`` into the output of ``f_a`` and ``k_{2r+1}`` into the output of
-    ``f_b``. :class:`KATAN_CVL` models this with one 2-bit round-key XOR per
-    step, so each round key is the 2-bit integer ``k_{2r} || k_{2r+1}`` (with
+    KATAN expands the 80-bit master key ``k_0, ..., k_79`` (``k_0`` being the
+    least significant bit) with the LFSR
+    ``k_i = k_{i-80} + k_{i-61} + k_{i-50} + k_{i-13}``. In every step of
+    round ``r`` (0-based), KATAN XORs the key bit ``k_{2r}`` into the output
+    of ``f_a`` and ``k_{2r+1}`` into the output of ``f_b``.
+    :class:`KATAN_CVL` models this with one 2-bit round-key XOR per step, so
+    each round key is the 2-bit integer ``k_{2r} || k_{2r+1}`` (with
     ``k_{2r}`` as most significant bit). As all steps of a round use the same
     key bits, KATAN48 and KATAN64 (2 resp. 3 steps per round) repeat each
     round key 2 resp. 3 times.
 
-    INPUT:
+    The key bits ``k_0, ..., k_79`` are taken directly from the master key.
+    As the LFSR is linear over `GF(2)`, all further key bits
+    ``k_80, ..., k_{2R-1}`` are computed by a single
+    :class:`civerly.component.LinearLayer_CVL` on the master key. The
+    repeated round keys of KATAN48/64 are wired as multiple output edges from
+    the same key bits.
 
-        - ``master_key`` -- integer; the 80-bit master key.
+    INPUT:
 
         - ``variant`` -- integer (default: ``32``); the block size of KATAN,
           one of ``{32, 48, 64}``. Determines the number of steps per round.
 
-    OUTPUT: A list of ``254 * steps`` 2-bit round-key integers, for all 254
-    rounds starting with round 1. A cipher with fewer rounds uses the leading
-    round keys only.
+        - ``R`` -- integer (default: ``254``); number of rounds, as in
+          :class:`KATAN_CVL`.
+
+        - ``name`` -- string (optional); the name of the key schedule.
 
     EXAMPLES::
 
-        sage: from civerly.cipher_implementations.katan import katan_key_schedule
-        sage: katan_key_schedule(0x0123456789abcdef0123)[:6]
+        sage: from civerly.cipher_implementations.katan import (
+        ....:   KATAN_KeySchedule_CVL)
+        sage: ks = KATAN_KeySchedule_CVL()
+        sage: ks(0x0123456789abcdef0123)[:6]
         [3, 0, 1, 0, 2, 0]
-        sage: katan_key_schedule(0x0123456789abcdef0123, variant=48)[:6]
+        sage: ks.input_length, ks.output_length, len(ks(0x0123))
+        (80, 508, 254)
+        sage: KATAN_KeySchedule_CVL(variant=48, R=3)(0x0123456789abcdef0123)
         [3, 3, 0, 0, 1, 1]
-        sage: len(katan_key_schedule(0x0)), len(katan_key_schedule(0x0, 64))
-        (254, 762)
+        sage: len(KATAN_KeySchedule_CVL(variant=64)(0x0))
+        762
+
+    Bits beyond the master key are produced by the LFSR::
+
+        sage: KATAN_KeySchedule_CVL(R=41)(1)[-1]  # k_80 = k_0 = 1, k_81 = 0
+        2
     """
-    if variant not in PARAMS:
-        raise ValueError("Unsupported KATAN variant")
-    k = _key_bits(master_key, 254)
-    return [
-        (k[2 * r] << 1) | k[2 * r + 1]
-        for r in range(254)
-        for _ in range(PARAMS[variant]["steps"])
-    ]
+
+    def __init__(self, variant=32, R=254, name=None):
+        if variant not in PARAMS:
+            raise ValueError("Unsupported KATAN variant")
+        if not 0 < R <= 254:
+            raise ValueError("Invalid number of rounds for KATAN")
+        if name is None:
+            name = f"KATAN{variant}-KeySchedule"
+        steps = PARAMS[variant]["steps"]
+        super().__init__(80, 2 * R * steps, name=name)
+        self._R = R
+        self._steps = steps
+
+        # Source ``(node, bit)`` of each key bit k_0, ..., k_{2R-1}. In the
+        # master-key vector, k_i is at position 79 - i (MSB first).
+        sources = [(self.IN, 79 - i) for i in range(min(80, 2 * R))]
+        if 2 * R > 80:
+            # rows[i]: k_i as GF(2)-linear combination of the input positions
+            rows = [[int(j == 79 - i) for j in range(80)] for i in range(80)]
+            for i in range(80, 2 * R):
+                rows.append(
+                    [
+                        a ^ b ^ c ^ d
+                        for a, b, c, d in zip(
+                            rows[i - 80], rows[i - 61], rows[i - 50], rows[i - 13]
+                        )
+                    ]
+                )
+            lfsr = self.add_subcipher(
+                LinearLayer_CVL(matrix(GF(2), rows[80:]), name=f"{name}-LFSR"),
+                [(self.IN, (j, j)) for j in range(80)],
+            )
+            sources += [(lfsr, i) for i in range(2 * R - 80)]
+
+        # round key of step s in round r: k_{2r} || k_{2r+1}
+        self.add_output(
+            [
+                (node, (bit, 2 * (r * steps + s) + b))
+                for r in range(R)
+                for s in range(steps)
+                for b, (node, bit) in enumerate(sources[2 * r : 2 * r + 2])
+            ]
+        )
+
+    def eval(self, master_key):
+        r"""
+        Expand the 80-bit ``master_key`` into the list of ``R * steps`` 2-bit
+        round-key integers, in the order of the round-key components of
+        :class:`KATAN_CVL`.
+
+        INPUT:
+
+            - ``master_key`` -- integer; the 80-bit master key.
+
+        OUTPUT: list of ``R * steps`` integers in ``{0, 1, 2, 3}``.
+        """
+        bits = Cipher.eval(self, int_to_vec(master_key, 80))
+        return [
+            (int(bits[2 * c]) << 1) | int(bits[2 * c + 1])
+            for c in range(self._R * self._steps)
+        ]
 
 
 def reference_katan_encrypt(variant, plaintext_int, key_int, rounds):
@@ -216,7 +292,7 @@ class KATAN_CVL(CipherImplementation_CVL, SBoxCipher):
     with the first round) are obtained via ``R``.
 
     The key bits are XORed into the outputs of ``f_a`` and ``f_b`` by one 2-bit
-    round-key XOR per step (see :func:`katan_key_schedule`), so the round keys
+    round-key XOR per step (see :class:`KATAN_KeySchedule_CVL`), so the round keys
     can be injected via ``set_round_keys``.
 
     EXAMPLES:
@@ -225,19 +301,19 @@ class KATAN_CVL(CipherImplementation_CVL, SBoxCipher):
     implementation)::
 
         sage: from civerly.cipher_implementations.katan import (
-        ....:   KATAN_CVL, katan_key_schedule, reference_katan_encrypt)
+        ....:   KATAN_CVL, KATAN_KeySchedule_CVL, reference_katan_encrypt)
         sage: from civerly.util import int_to_vec, vec_to_int
-        sage: from functools import partial
         sage: key = 0x0123456789abcdef0123  # 80-bit example key
         sage: c32 = KATAN_CVL(
-        ....:   variant=32, R=10, key_schedule=katan_key_schedule, key=key)
+        ....:   variant=32, R=10, key_schedule=KATAN_KeySchedule_CVL(32, 10),
+        ....:   key=key)
         sage: pt32 = 0x12345678
         sage: vec_to_int(c32(int_to_vec(pt32, 32))) == \
         ....:   reference_katan_encrypt(32, pt32, key, 10)
         True
         sage: vec_to_int(c32(int_to_vec(pt32, 32))) == 0xdb31e2cd
         True
-        sage: ks48 = partial(katan_key_schedule, variant=48)
+        sage: ks48 = KATAN_KeySchedule_CVL(variant=48, R=8)
         sage: c48 = KATAN_CVL(variant=48, R=8, key_schedule=ks48, key=key)
         sage: pt48 = 0x123456789abc
         sage: vec_to_int(c48(int_to_vec(pt48, 48))) == \
@@ -245,7 +321,7 @@ class KATAN_CVL(CipherImplementation_CVL, SBoxCipher):
         True
         sage: vec_to_int(c48(int_to_vec(pt48, 48))) == 0x51873abc9a78
         True
-        sage: ks64 = partial(katan_key_schedule, variant=64)
+        sage: ks64 = KATAN_KeySchedule_CVL(variant=64, R=6)
         sage: c64 = KATAN_CVL(variant=64, R=6, key_schedule=ks64, key=key)
         sage: pt64 = 0x0123456789abcdef
         sage: vec_to_int(c64(int_to_vec(pt64, 64))) == \
@@ -259,7 +335,7 @@ class KATAN_CVL(CipherImplementation_CVL, SBoxCipher):
     per step, i.e. ``R`` of them for KATAN32)::
 
         sage: from civerly.keyschedule import DefaultKeySchedule_CVL
-        sage: rks = katan_key_schedule(key)[:10]
+        sage: rks = KATAN_KeySchedule_CVL(R=10)(key)
         sage: c32 = KATAN_CVL(
         ....:   variant=32, R=10, key_schedule=DefaultKeySchedule_CVL(2, 10),
         ....:   key=rks)
@@ -273,10 +349,10 @@ class KATAN_CVL(CipherImplementation_CVL, SBoxCipher):
         ....:   reference_katan_encrypt(32, pt32, 0, 10)
         True
 
-    Reduced-round versions use the leading round keys of the key schedule::
+    Reduced-round versions with a matching key schedule::
 
         sage: c32 = KATAN_CVL(
-        ....:   variant=32, R=5, key_schedule=katan_key_schedule, key=key)
+        ....:   variant=32, R=5, key_schedule=KATAN_KeySchedule_CVL(R=5), key=key)
         sage: vec_to_int(c32(int_to_vec(pt32, 32))) == 0x46dacf16
         True
 
@@ -353,9 +429,9 @@ class KATAN_CVL(CipherImplementation_CVL, SBoxCipher):
             - ``key_schedule`` -- callable or
               :class:`civerly.keyschedule.KeySchedule` (optional); Key
               schedule used to derive round keys from ``key`` via
-              ``set_round_keys``. Pass :func:`katan_key_schedule` to use the
-              real KATAN key schedule (for KATAN48/64 via
-              ``functools.partial`` with the matching ``variant``), or
+              ``set_round_keys``. Pass
+              ``KATAN_KeySchedule_CVL(variant, R)`` (same ``variant`` and
+              ``R``) to use the real KATAN key schedule, or
               :class:`civerly.keyschedule.DefaultKeySchedule_CVL` to pass
               explicit round keys (2 bits each, one per step, i.e.
               ``R * steps`` of them with ``steps`` = 1, 2, 3 for KATAN32, 48,

@@ -1,7 +1,16 @@
 from sage.crypto.sbox import SBox
 
+from civerly.cipher import Cipher
 from civerly.cipher_implementations.base import CipherImplementation_CVL
-from civerly.component import XOR_CVL, PermuteLayer_CVL, RoundkeyXOR_CVL, SBox_CVL
+from civerly.component import (
+    XOR_CVL,
+    ConstXOR_CVL,
+    PermuteLayer_CVL,
+    RoundkeyXOR_CVL,
+    SBox_CVL,
+)
+from civerly.keyschedule import KeySchedule
+from civerly.util import int_to_vec, vec_to_int
 from civerly.wordsboxcipher import WordSBoxCipher
 
 _SBOX_TABLE = (
@@ -18,139 +27,162 @@ _ROUND_CONSTANTS = (
 )  # fmt: skip
 
 
-def _key_schedule_80(key):
-    r"""
-    Compute the 36 32-bit round keys for TWINE-80.
+# Positions of the eight round-key nibbles RK^0, ..., RK^7 in the key state.
+_RK_NIBBLES = {
+    80: (1, 3, 4, 6, 13, 14, 15, 16),
+    128: (2, 3, 12, 15, 17, 18, 28, 31),
+}
 
-    INPUT:
+# (source, target) nibble pairs of ``WK[target] ^= S(WK[source])``.
+_SBOX_PAIRS = {
+    80: ((0, 1), (16, 4)),
+    128: ((0, 1), (16, 4), (30, 23)),
+}
 
-        - ``key`` -- integer; The 80-bit master key.
 
-    OUTPUT: A list of 36 32-bit round keys.
-    """
-    WK = [(key >> (4 * (19 - i))) & 0xF for i in range(20)]
-    rks = []
-    for r in range(1, 36):
-        rk = (
-            (WK[1] << 28)
-            | (WK[3] << 24)
-            | (WK[4] << 20)
-            | (WK[6] << 16)
-            | (WK[13] << 12)
-            | (WK[14] << 8)
-            | (WK[15] << 4)
-            | WK[16]
+class TWINE_KeySchedule_CVL(KeySchedule):
+    def __init__(self, R=36, key_size=80, name=None):
+        r"""
+        The TWINE key schedule (80-bit or 128-bit key) as a CiVerLy DAG.
+
+        The master key is loaded into a state of ``key_size / 4`` nibbles
+        ``WK_0 | WK_1 | ...`` (``WK_0`` most significant). Round key ``RK_0``
+        is extracted from the initial state, and each of the ``R - 1`` key
+        schedule steps updates the state (S-box XORs, round-constant XOR,
+        nibble rotation) before the next round key is extracted.
+
+        TWINE XORs a 32-bit round key ``RK_r = RK_r^0 \| ... \| RK_r^7`` into
+        the eight even-indexed nibbles of the state in every round. As
+        :class:`TWINE_CVL` uses one 4-bit round-key component per nibble,
+        :meth:`eval` returns the round keys split into nibbles: the ``R``
+        round keys (round key 0 first), each as its 8 nibbles (``RK_r^0``,
+        i.e. the most significant nibble, first). This is the order of the
+        round-key components of :class:`TWINE_CVL`.
+
+        INPUT:
+
+            - ``R`` -- integer (default: ``36``); Number of rounds of the
+              cipher, i.e. number of 32-bit round keys (at most 36).
+
+            - ``key_size`` -- integer (default: ``80``); Key size in bits,
+              either ``80`` or ``128``.
+
+            - ``name`` -- string (optional); Name of the key schedule.
+
+        EXAMPLES::
+
+            sage: from civerly.cipher_implementations.twine \
+            ....:   import TWINE_KeySchedule_CVL
+            sage: ks = TWINE_KeySchedule_CVL()
+            sage: rk_nibbles = ks(0x00112233445566778899)
+            sage: len(rk_nibbles)
+            288
+            sage: [hex(n) for n in rk_nibbles[:8]]
+            ['0x0', '0x1', '0x2', '0x3', '0x6', '0x7', '0x7', '0x8']
+            sage: "".join(f"{n:x}" for n in rk_nibbles[-8:])  # RK_35
+            '3532006e'
+            sage: ks = TWINE_KeySchedule_CVL(R=2, key_size=128)
+            sage: (ks.input_length, ks.output_length)
+            (128, 64)
+            sage: "".join(f"{n:x}" for n in ks(0x00112233445566778899AABBCCDDEEFF))
+            '116789ef3388abc0'
+            sage: TWINE_KeySchedule_CVL(key_size=96)
+            Traceback (most recent call last):
+            ...
+            ValueError: key_size must be 80 or 128, got 96
+        """
+        if key_size not in _RK_NIBBLES:
+            raise ValueError(f"key_size must be 80 or 128, got {key_size}")
+        if not 1 <= R <= len(_ROUND_CONSTANTS) + 1:
+            raise ValueError(
+                f"R must be between 1 and {len(_ROUND_CONSTANTS) + 1}, got {R}"
+            )
+        if name is None:
+            name = f"TWINE-{key_size}-KeySchedule"
+        super().__init__(key_size, 32 * R, name=name)
+        self._key_size = key_size
+        self._R = R
+
+        rk_nibbles = _RK_NIBBLES[key_size]
+
+        def rk_edges(src, r):
+            return [
+                (src, (4 * p + b, 32 * r + 4 * j + b))
+                for j, p in enumerate(rk_nibbles)
+                for b in range(4)
+            ]
+
+        output_edges = rk_edges(self.IN, 0)
+        node = self.IN
+        for r in range(1, R):
+            node = self.add_subcipher(
+                self._make_ks_step(key_size, _ROUND_CONSTANTS[r - 1], r),
+                [(node, (i, i)) for i in range(key_size)],
+            )
+            output_edges += rk_edges(node, r)
+        self.add_output(output_edges)
+
+    def eval(self, master_key):
+        r"""
+        Expand ``master_key`` into the round keys, as ``8 * R`` nibbles.
+
+        INPUT:
+
+            - ``master_key`` -- integer; The 80-bit or 128-bit master key.
+
+        OUTPUT: A list of ``8 * R`` 4-bit integers, round key 0 first, each
+        round key most significant nibble first.
+        """
+        bits = Cipher.eval(self, int_to_vec(master_key, self.input_length))
+        return [
+            vec_to_int(bits[4 * i : 4 * (i + 1)])
+            for i in range(self.output_length // 4)
+        ]
+
+    @staticmethod
+    def _make_ks_step(key_size, con, r):
+        r"""
+        One TWINE key schedule step as a :class:`WordSBoxCipher` on nibbles.
+
+        For TWINE-80 (``N = 20`` nibbles)::
+
+            WK_1 ^= S(WK_0);  WK_4 ^= S(WK_16)
+            WK_7 ^= CON_H;    WK_19 ^= CON_L
+            WK = WK_4 | ... | WK_{N-1} | WK_1 | WK_2 | WK_3 | WK_0
+
+        TWINE-128 (``N = 32``) additionally computes ``WK_23 ^= S(WK_30)``.
+        ``CON_H`` and ``CON_L`` are the upper and lower 3 bits of the 6-bit
+        round constant ``con``.
+        """
+        N = key_size // 4
+        step = WordSBoxCipher(4, N, N, name=f"KS-step-{r}")
+        sbox = SBox_CVL(SBox(_SBOX_TABLE), name="S")
+
+        state = [(step.IN, i) for i in range(N)]
+        for src, dst in _SBOX_PAIRS[key_size]:
+            node_s = step.add_subcipher(sbox, [(step.IN, (src, 0))])
+            node_x = step.add_subcipher(
+                XOR_CVL(4, name=f"XOR_WK{dst}"),
+                [(step.IN, (dst, 0)), (node_s, (0, 1))],
+            )
+            state[dst] = (node_x, 0)
+
+        # Round constant: CON_H into WK_7, CON_L into WK_19.
+        const = ((con >> 3) & 0x7) << (4 * (N - 1 - 7))
+        const |= (con & 0x7) << (4 * (N - 1 - 19))
+        node_c = step.add_subcipher(
+            ConstXOR_CVL(key_size, const, name=f"CON{r}"),
+            [(src, (w, i)) for i, (src, w) in enumerate(state)],
         )
-        rks.append(rk)
-        WK[1] = WK[1] ^ _SBOX_TABLE[WK[0]]
-        WK[4] = WK[4] ^ _SBOX_TABLE[WK[16]]
-        con = _ROUND_CONSTANTS[r - 1]
-        WK[7] = WK[7] ^ ((con >> 3) & 0x7)
-        WK[19] = WK[19] ^ (con & 0x7)
-        WK[0:4] = [*WK[1:4], WK[0]]
-        WK[0:20] = WK[4:20] + WK[0:4]
-    rk = (
-        (WK[1] << 28)
-        | (WK[3] << 24)
-        | (WK[4] << 20)
-        | (WK[6] << 16)
-        | (WK[13] << 12)
-        | (WK[14] << 8)
-        | (WK[15] << 4)
-        | WK[16]
-    )
-    rks.append(rk)
-    return rks
 
-
-def _key_schedule_128(key):
-    r"""
-    Compute the 36 32-bit round keys for TWINE-128.
-
-    INPUT:
-
-        - ``key`` -- integer; The 128-bit master key.
-
-    OUTPUT: A list of 36 32-bit round keys.
-    """
-    WK = [(key >> (4 * (31 - i))) & 0xF for i in range(32)]
-    rks = []
-    for r in range(1, 36):
-        rk = (
-            (WK[2] << 28)
-            | (WK[3] << 24)
-            | (WK[12] << 20)
-            | (WK[15] << 16)
-            | (WK[17] << 12)
-            | (WK[18] << 8)
-            | (WK[28] << 4)
-            | WK[31]
+        # Nibble rotation: input nibble i goes to output nibble perm[i].
+        perm = [N - 1, N - 4, N - 3, N - 2] + list(range(N - 4))
+        node_p = step.add_subcipher(
+            PermuteLayer_CVL(perm, word_coarseness=4, name="ROT"),
+            [(node_c, (i, i)) for i in range(N)],
         )
-        rks.append(rk)
-        WK[1] = WK[1] ^ _SBOX_TABLE[WK[0]]
-        WK[4] = WK[4] ^ _SBOX_TABLE[WK[16]]
-        WK[23] = WK[23] ^ _SBOX_TABLE[WK[30]]
-        con = _ROUND_CONSTANTS[r - 1]
-        WK[7] = WK[7] ^ ((con >> 3) & 0x7)
-        WK[19] = WK[19] ^ (con & 0x7)
-        WK[0:4] = [*WK[1:4], WK[0]]
-        WK[0:32] = WK[4:32] + WK[0:4]
-    rk = (
-        (WK[2] << 28)
-        | (WK[3] << 24)
-        | (WK[12] << 20)
-        | (WK[15] << 16)
-        | (WK[17] << 12)
-        | (WK[18] << 8)
-        | (WK[28] << 4)
-        | WK[31]
-    )
-    rks.append(rk)
-    return rks
-
-
-def twine_key_schedule(master_key, key_size=80):
-    r"""
-    The TWINE key schedule.
-
-    TWINE XORs a 32-bit round key ``RK_r = RK_r^0 \| ... \| RK_r^7`` into the
-    eight even-indexed nibbles of the state in every round. As the cipher
-    implementation uses one 4-bit round-key component per nibble, this
-    function returns the round keys split into nibbles: the 36 round keys
-    (round key 0 first), each as its 8 nibbles (``RK_r^0``, i.e. the most
-    significant nibble, first). This is the order of the round-key components
-    of :class:`TWINE_CVL`.
-
-    INPUT:
-
-        - ``master_key`` -- integer; The master key (80 or 128 bits).
-
-        - ``key_size`` -- integer (default: ``80``); Key size in bits, either
-          ``80`` or ``128``. Use :func:`functools.partial` to pass
-          ``key_size=128`` together with this function as ``key_schedule``.
-
-    OUTPUT: A list of ``36 * 8 = 288`` 4-bit integers.
-
-    EXAMPLES::
-
-        sage: from civerly.cipher_implementations.twine import twine_key_schedule
-        sage: rk_nibbles = twine_key_schedule(0x00112233445566778899)
-        sage: len(rk_nibbles)
-        288
-        sage: [hex(n) for n in rk_nibbles[:8]]
-        ['0x0', '0x1', '0x2', '0x3', '0x6', '0x7', '0x7', '0x8']
-        sage: twine_key_schedule(0x0, key_size=96)
-        Traceback (most recent call last):
-        ...
-        ValueError: key_size must be 80 or 128, got 96
-    """
-    if key_size == 80:
-        rks = _key_schedule_80(master_key)
-    elif key_size == 128:
-        rks = _key_schedule_128(master_key)
-    else:
-        raise ValueError(f"key_size must be 80 or 128, got {key_size}")
-    return [(rk >> (28 - 4 * j)) & 0xF for rk in rks for j in range(8)]
+        step.add_output([(node_p, (i, i)) for i in range(N)])
+        return step
 
 
 class TWINE_CVL(CipherImplementation_CVL, WordSBoxCipher):
@@ -174,9 +206,9 @@ class TWINE_CVL(CipherImplementation_CVL, WordSBoxCipher):
             - ``key_schedule`` -- callable or
               :class:`civerly.keyschedule.KeySchedule` (optional); Key
               schedule used to derive round keys from ``key`` via
-              ``set_round_keys``. Pass :func:`twine_key_schedule` to use the
-              real TWINE-80 key schedule (or
-              ``functools.partial(twine_key_schedule, key_size=128)`` for
+              ``set_round_keys``. Pass
+              ``TWINE_KeySchedule_CVL(R=R)`` to use the real TWINE-80 key
+              schedule (or ``TWINE_KeySchedule_CVL(R=R, key_size=128)`` for
               TWINE-128), or :class:`civerly.keyschedule.DefaultKeySchedule_CVL`
               to pass explicit round keys. Every 32-bit round key is applied as
               8 nibbles, so explicit round keys are given as ``8 * R`` nibbles
@@ -204,23 +236,22 @@ class TWINE_CVL(CipherImplementation_CVL, WordSBoxCipher):
         App. B)::
 
             sage: from civerly.cipher_implementations.twine \
-            ....:   import TWINE_CVL, twine_key_schedule
+            ....:   import TWINE_CVL, TWINE_KeySchedule_CVL
             sage: from civerly.util import int_to_vec, vec_to_int
             sage: cipher = TWINE_CVL(
-            ....:   key_schedule=twine_key_schedule, key=0x00112233445566778899,
-            ....:   name="TWINE-80")
+            ....:   key_schedule=TWINE_KeySchedule_CVL(),
+            ....:   key=0x00112233445566778899, name="TWINE-80")
             sage: pt = int_to_vec(0x0123456789ABCDEF, 64)
             sage: hex(vec_to_int(cipher(pt)))
             '0x7c1f0f80b1df9c28'
 
         Encrypt with a 128-bit master key::
 
-            sage: from functools import partial
             sage: from civerly.cipher_implementations.twine \
-            ....:   import TWINE_CVL, twine_key_schedule
+            ....:   import TWINE_CVL, TWINE_KeySchedule_CVL
             sage: from civerly.util import int_to_vec, vec_to_int
             sage: cipher = TWINE_CVL(
-            ....:   key_schedule=partial(twine_key_schedule, key_size=128),
+            ....:   key_schedule=TWINE_KeySchedule_CVL(key_size=128),
             ....:   key=0x00112233445566778899AABBCCDDEEFF, name="TWINE-128")
             sage: pt = int_to_vec(0x0123456789ABCDEF, 64)
             sage: hex(vec_to_int(cipher(pt)))
@@ -230,10 +261,10 @@ class TWINE_CVL(CipherImplementation_CVL, WordSBoxCipher):
         :class:`civerly.keyschedule.DefaultKeySchedule_CVL`::
 
             sage: from civerly.cipher_implementations.twine \
-            ....:   import TWINE_CVL, twine_key_schedule
+            ....:   import TWINE_CVL, TWINE_KeySchedule_CVL
             sage: from civerly.keyschedule import DefaultKeySchedule_CVL
             sage: from civerly.util import int_to_vec, vec_to_int
-            sage: rks = twine_key_schedule(0x00112233445566778899)
+            sage: rks = TWINE_KeySchedule_CVL()(0x00112233445566778899)
             sage: cipher = TWINE_CVL(
             ....:   key_schedule=DefaultKeySchedule_CVL(4, 8 * 36), key=rks,
             ....:   name="TWINE-explicit")
