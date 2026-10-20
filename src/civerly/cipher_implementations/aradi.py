@@ -229,19 +229,14 @@ class ARADI_KeySchedule_CVL(KeySchedule):
         """
         step = SBoxCipher(256, 256, name=f"KS-step-{j}")
         mixes = [
-            step.add_subcipher(
-                mix, [(step.IN, (64 * p + i, i)) for i in range(64)]
-            )
+            step.add_subcipher(mix, [(step.IN, (64 * p + i, i)) for i in range(64)])
             for p, mix in enumerate([m0, m1, m0, m1])
         ]
         # Source of each mixed word t_0, ..., t_7 as (node, bit offset).
         words = [(mixes[w // 2], 32 * (w % 2)) for w in range(8)]
 
         # P_j: output word k takes mixed word perm[k].
-        if j % 2 == 0:
-            perm = [0, 2, 1, 3, 4, 6, 5, 7]
-        else:
-            perm = [0, 4, 2, 6, 1, 5, 3, 7]
+        perm = [0, 2, 1, 3, 4, 6, 5, 7] if j % 2 == 0 else [0, 4, 2, 6, 1, 5, 3, 7]
 
         # Word 7 is fixed by both permutations; add the counter to it.
         node_c, off_c = words[perm[7]]

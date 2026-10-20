@@ -28,11 +28,11 @@ from sage.rings.finite_rings.finite_field_constructor import GF
 from civerly.cipher import Cipher
 from civerly.cipher_implementations.base import CipherImplementation_CVL
 from civerly.component import (
+    XOR_CVL,
     LinearLayer_CVL,
     PermuteLayer_CVL,
     RoundkeyXOR_CVL,
     SBox_CVL,
-    XOR_CVL,
 )
 from civerly.keyschedule import KeySchedule
 from civerly.util import int_to_vec, vec_to_int
@@ -923,17 +923,17 @@ class BLINK_KeySchedule_CVL(KeySchedule):
             return (self.IN, j * n)
 
         rk = [key_slice(j + 2) for j in range(ra + rb)]
-        slots = (
-            [key_slice(0)]
-            + rk[:a]
-            + [(h0, None)]
-            + rk[a : a + b]
-            + [(h01, None)]
-            + rk[:b]
-            + [(h1, None)]
-            + rk[b : a + b]
-            + [key_slice(1)]
-        )
+        slots = [
+            key_slice(0),
+            *rk[:a],
+            (h0, None),
+            *rk[a : a + b],
+            (h01, None),
+            *rk[:b],
+            (h1, None),
+            *rk[b : a + b],
+            key_slice(1),
+        ]
         edges = []
         for s, (node, off) in enumerate(slots):
             if off is None:
@@ -1151,7 +1151,7 @@ class BLINK_CVL(CipherImplementation_CVL, WordSBoxCipher):
         if key_bytes is None:
             key_bytes = (n // 8) * (ra_rb_from_n_t(n, t) + 2)
 
-        state_bytes, tweak_bytes, ra, rb, pbox, rc, rc_prime = _variant_config(
+        state_bytes, _tweak_bytes, ra, rb, pbox, rc, rc_prime = _variant_config(
             n, t, key_bytes
         )
 

@@ -190,7 +190,11 @@ class KATAN_KeySchedule_CVL(KeySchedule):
                     [
                         a ^ b ^ c ^ d
                         for a, b, c, d in zip(
-                            rows[i - 80], rows[i - 61], rows[i - 50], rows[i - 13]
+                            rows[i - 80],
+                            rows[i - 61],
+                            rows[i - 50],
+                            rows[i - 13],
+                            strict=False,
                         )
                     ]
                 )

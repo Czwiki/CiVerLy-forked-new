@@ -26,8 +26,8 @@ from sage.crypto.sbox import SBox as SBox_sage
 from sage.matrix.constructor import Matrix as matrix
 from sage.rings.finite_rings.finite_field_constructor import GF
 
-from civerly.cipher_implementations.base import CipherImplementation_CVL
 from civerly.cipher import Cipher
+from civerly.cipher_implementations.base import CipherImplementation_CVL
 from civerly.component import (
     C_CVL,
     XOR_CVL,
@@ -694,8 +694,11 @@ class SERPENT_KeySchedule_CVL(KeySchedule):
             srcs = [sources[c + d] for d in (0, 3, 5, 7)]
             node = step.add_subcipher(
                 SERPENT_KeySchedule_CVL._make_prekey_word(4 * i + c, rot),
-                [(a, (off + j, 32 * t + j)) for t, (a, off) in enumerate(srcs)
-                 for j in range(32)],
+                [
+                    (a, (off + j, 32 * t + j))
+                    for t, (a, off) in enumerate(srcs)
+                    for j in range(32)
+                ],
             )
             sources.append((node, 0))
 
@@ -715,8 +718,11 @@ class SERPENT_KeySchedule_CVL(KeySchedule):
         sboxlayer.add_output(sb_out)
         node_sb = step.add_subcipher(
             sboxlayer,
-            [(a, (off + j, 32 * (3 - c) + j)) for c, (a, off) in
-             enumerate(sources[8:]) for j in range(32)],
+            [
+                (a, (off + j, 32 * (3 - c) + j))
+                for c, (a, off) in enumerate(sources[8:])
+                for j in range(32)
+            ],
         )
 
         # Initial permutation: KHat bit p is bit IP_TABLE[p] of the packed

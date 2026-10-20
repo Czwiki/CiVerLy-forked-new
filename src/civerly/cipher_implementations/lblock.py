@@ -1,7 +1,7 @@
 from sage.crypto.sbox import SBox
 
-from civerly.cipher_implementations.base import CipherImplementation_CVL
 from civerly.cipher import Cipher
+from civerly.cipher_implementations.base import CipherImplementation_CVL
 from civerly.component import (
     XOR_CVL,
     ConstXOR_CVL,
@@ -52,6 +52,7 @@ def _build_sbox_layer():
         )
         sboxlayer.add_output([(node, (j, src_start + j)) for j in range(4)])
     return sboxlayer
+
 
 def _make_ks_step(i):
     r"""
@@ -327,9 +328,7 @@ class LBLOCK_CVL(CipherImplementation_CVL, SBoxCipher):
         node = self.add_subcipher(final_swap, [(node, (i, i)) for i in range(64)])
         self.add_output([(node, (i, i)) for i in range(64)])
 
-        self._rk_components = [
-            self.nodes[r + 1].nodes[node_rk] for r in range(self.R)
-        ]
+        self._rk_components = [self.nodes[r + 1].nodes[node_rk] for r in range(self.R)]
 
         if key_schedule is not None and key is not None:
             self.set_round_keys(key)

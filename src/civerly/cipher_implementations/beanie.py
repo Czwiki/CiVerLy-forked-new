@@ -150,9 +150,7 @@ class BEANIE_KeySchedule_CVL(KeySchedule):
             ValueError: master_key and tweak must be 128-bit integers or pairs ...
         """
         if not 3 <= R <= 9:
-            raise ValueError(
-                f"the BEANIE key schedule supports 3 <= R <= 9, got R={R}"
-            )
+            raise ValueError(f"the BEANIE key schedule supports 3 <= R <= 9, got R={R}")
         tweak = _to_int128(tweak)
         super().__init__(128, 32 * (R + 1), name=name)
         self._R = R
@@ -563,9 +561,7 @@ class BEANIE_CVL(CipherImplementation_CVL, AESlike):
             if R is None:
                 R = 5
 
-        super().__init__(
-            4, 4, 2, R=R, key_schedule=key_schedule, key=key, name=name
-        )
+        super().__init__(4, 4, 2, R=R, key_schedule=key_schedule, key=key, name=name)
 
         # BEANIE S-box
         sbox = SBox_CVL(SBox(_SBOX), name="SBox")
@@ -669,9 +665,7 @@ class BEANIE_CVL(CipherImplementation_CVL, AESlike):
                 rk_components.append(self.nodes[node].nodes[node_rk])
 
             # Last round (without MixColumns) and final key addition
-            node = self.add_subcipher(
-                beanie_last, [(node, (i, i)) for i in range(8)]
-            )
+            node = self.add_subcipher(beanie_last, [(node, (i, i)) for i in range(8)])
             rk_components.append(self.nodes[node].nodes[node_rk_last])
             node = self.add_subcipher(key_add, [(node, (i, i)) for i in range(8)])
             rk_components.append(self.nodes[node])
@@ -704,9 +698,7 @@ class BEANIE_CVL(CipherImplementation_CVL, AESlike):
             node_rk_inv_second = beanie_inv_last.add_subcipher(
                 key_add, [(node_s_inv, (i, i)) for i in range(8)]
             )
-            beanie_inv_last.add_output(
-                [(node_rk_inv_second, (i, i)) for i in range(8)]
-            )
+            beanie_inv_last.add_output([(node_rk_inv_second, (i, i)) for i in range(8)])
 
             # Inverse round block: MixColumns -> ShiftRows -> SBox_inv -> KeyAdd
             beanie_inv_round = AESlike(4, 4, 2, name="BEANIE-inv-round")
@@ -727,9 +719,7 @@ class BEANIE_CVL(CipherImplementation_CVL, AESlike):
             node_rk_inv_round = beanie_inv_round.add_subcipher(
                 key_add, [(node_s_inv, (i, i)) for i in range(8)]
             )
-            beanie_inv_round.add_output(
-                [(node_rk_inv_round, (i, i)) for i in range(8)]
-            )
+            beanie_inv_round.add_output([(node_rk_inv_round, (i, i)) for i in range(8)])
 
             # Assemble the U-shape cipher. Round keys: rl+1 of the left branch,
             # followed by rr+1 of the right branch.
@@ -767,9 +757,7 @@ class BEANIE_CVL(CipherImplementation_CVL, AESlike):
             self.add_output([(node, (i, i)) for i in range(8)])
 
             # A branch with zero rounds has no round key components.
-            self._rk_components = [
-                rk for rk in rks_left + rks_right if rk is not None
-            ]
+            self._rk_components = [rk for rk in rks_left + rks_right if rk is not None]
 
         if key_schedule is not None and key is not None:
             self.set_round_keys(key)

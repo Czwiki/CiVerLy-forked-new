@@ -176,7 +176,7 @@ class TWINE_KeySchedule_CVL(KeySchedule):
         )
 
         # Nibble rotation: input nibble i goes to output nibble perm[i].
-        perm = [N - 1, N - 4, N - 3, N - 2] + list(range(N - 4))
+        perm = [N - 1, N - 4, N - 3, N - 2, *list(range(N - 4))]
         node_p = step.add_subcipher(
             PermuteLayer_CVL(perm, word_coarseness=4, name="ROT"),
             [(node_c, (i, i)) for i in range(N)],

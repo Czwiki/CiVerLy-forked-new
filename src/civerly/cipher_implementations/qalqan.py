@@ -64,8 +64,8 @@ from sage.crypto.sbox import SBox
 from civerly.cipher import Cipher
 from civerly.cipher_implementations.base import CipherImplementation_CVL
 from civerly.component import (
-    RK_CVL,
     C_CVL,
+    RK_CVL,
     ModAdd_CVL,
     PermuteLayer_CVL,
     RoundkeyXOR_CVL,
@@ -398,10 +398,7 @@ def qalqan_round_keys_to_components(round_keys, key_size=256):
         ['0x2010000000000000000000000000000', '0x102']
     """
     n = _rounds_for_key(key_size // 8)
-    return [
-        _byte_rev_int(rk) if 0 < r < n else rk
-        for r, rk in enumerate(round_keys)
-    ]
+    return [_byte_rev_int(rk) if 0 < r < n else rk for r, rk in enumerate(round_keys)]
 
 
 class QALQAN_CVL(CipherImplementation_CVL, Cipher):
@@ -715,15 +712,13 @@ class QALQAN_CVL(CipherImplementation_CVL, Cipher):
         R = int(R)
         if R < 1:
             raise ValueError("R must be positive.")
-        if R > full_rounds + 1:
+        if full_rounds + 1 < R:
             raise ValueError(
                 f"R={R} exceeds N + 1 = {full_rounds + 1} rounds for a "
                 f"{key_size}-bit key."
             )
 
-        super().__init__(
-            128, 128, R=R, key_schedule=key_schedule, key=key, name=name
-        )
+        super().__init__(128, 128, R=R, key_schedule=key_schedule, key=key, name=name)
 
         # ---- reusable S-box layer -------------------------------------
         sbox_cipher = Cipher(128, 128, name="SBoxLayer")
@@ -947,7 +942,7 @@ class QALQAN_KeySchedule_CVL(KeySchedule):
         R = int(R)
         if R < 1:
             raise ValueError("R must be positive.")
-        if R > full_rounds + 1:
+        if full_rounds + 1 < R:
             raise ValueError(
                 f"R={R} exceeds N + 1 = {full_rounds + 1} rounds for a "
                 f"{key_size}-bit key."
@@ -984,9 +979,7 @@ class QALQAN_KeySchedule_CVL(KeySchedule):
             reverse = 0 < r < full_rounds
             for j in range(16):
                 dst = 128 * r + 8 * (15 - j if reverse else j)
-                self.add_output(
-                    [(node, (264 + 8 * j + b, dst + b)) for b in range(8)]
-                )
+                self.add_output([(node, (264 + 8 * j + b, dst + b)) for b in range(8)])
 
     @staticmethod
     def _make_round_step(with_extra):
@@ -1069,8 +1062,7 @@ class QALQAN_KeySchedule_CVL(KeySchedule):
         if isinstance(master_key, (bytes, bytearray)):
             if len(master_key) * 8 != self.key_size:
                 raise ValueError(
-                    f"Key has {len(master_key) * 8} bits, "
-                    f"expected {self.key_size}."
+                    f"Key has {len(master_key) * 8} bits, expected {self.key_size}."
                 )
             master_key = int.from_bytes(master_key, "big")
         bits = Cipher.eval(self, int_to_vec(int(master_key), self.input_length))
